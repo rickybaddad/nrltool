@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { prisma } from "@/lib/db/prisma";
 import { MatchCard } from "@/components/match-card";
 import type { Prisma } from "@prisma/client";
@@ -16,6 +17,9 @@ export default async function Home({ searchParams }: { searchParams?: Promise<{ 
     include: { match: true; homeTeam: true; awayTeam: true };
   }>;
 
+  const now = new Date();
+  const currentSeason = now.getUTCFullYear();
+
   let predictions: PredictionWithRelations[] = [];
   let loadError: string | null = null;
 
@@ -27,23 +31,34 @@ export default async function Home({ searchParams }: { searchParams?: Promise<{ 
         awayTeam: true
       },
       orderBy: { generatedAt: "desc" },
-      take: 50
+      take: 200
     });
   } catch (error) {
     console.error("Failed to load predictions", error);
     loadError = "Predictions are temporarily unavailable. Please check your database connection and try again.";
   }
 
-  const newestByMatch = Array.from(new Map(predictions.map((p) => [p.matchId, p])).values()).filter((p) => p.match.kickoffAt >= new Date());
+  const newestByMatch = Array.from(new Map(predictions.map((p) => [p.matchId, p])).values()).filter((p) => p.match.kickoffAt >= now);
   const sorted = sortPredictions(newestByMatch.map((p) => ({ ...p, kickoffAt: p.match.kickoffAt })), sort);
+
+  const currentRoundMatch = await prisma.match.findFirst({
+    where: { season: currentSeason, kickoffAt: { gte: now } },
+    orderBy: { kickoffAt: "asc" }
+  });
+
+  const currentRound = currentRoundMatch?.round ?? 1;
 
   return (
     <main className="mx-auto max-w-5xl p-6">
-      <h1 className="mb-6 text-4xl font-bold">NRL Model</h1>
+      <h1 className="mb-3 text-4xl font-bold">NRL Model</h1>
+      <p className="mb-4 text-sm text-slate-300">Season-aware dashboard for full-year fixture tracking, predictions, and graded outcomes.</p>
+
       <div className="mb-4 flex flex-wrap gap-2 text-sm">
         <a href="/?sort=time" className="rounded bg-slate-800 px-3 py-1">Sort: Time</a>
         <a href="/?sort=edge" className="rounded bg-slate-800 px-3 py-1">Sort: Biggest Edge</a>
         <a href="/?sort=confidence" className="rounded bg-slate-800 px-3 py-1">Sort: Confidence</a>
+        <Link href={`/season/${currentSeason}`} className="rounded bg-sky-700 px-3 py-1">Season {currentSeason}</Link>
+        <Link href={`/season/${currentSeason}/round/${currentRound}`} className="rounded bg-slate-700 px-3 py-1">Current Round {currentRound}</Link>
         <a href="/settings" className="rounded bg-slate-700 px-3 py-1">Settings</a>
       </div>
       {loadError ? (

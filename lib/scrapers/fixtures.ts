@@ -1,5 +1,6 @@
 import axios from "axios";
 import * as cheerio from "cheerio";
+import { MatchStatus } from "@prisma/client";
 
 const SCRAPER_HEADERS = {
   "User-Agent":
@@ -10,16 +11,30 @@ const SCRAPER_HEADERS = {
 
 export type FixtureRow = {
   externalId: string;
+  season: number;
   round: number;
   kickoffAt: Date;
   homeTeamName: string;
   awayTeamName: string;
   venue?: string;
   sourceUrl: string;
+  status: MatchStatus;
+  homeScore?: number;
+  awayScore?: number;
 };
 
-export async function scrapeNrlFixtures(url = "https://www.nrl.com/draw/"): Promise<FixtureRow[]> {
-  const res = await axios.get(url, { timeout: 15000, headers: SCRAPER_HEADERS });
+function parseStatus(raw: string): MatchStatus {
+  const value = raw.toLowerCase();
+  if (value.includes("full time") || value.includes("finished")) return MatchStatus.FINISHED;
+  if (value.includes("live")) return MatchStatus.LIVE;
+  if (value.includes("postpon")) return MatchStatus.POSTPONED;
+  if (value.includes("cancel")) return MatchStatus.CANCELLED;
+  return MatchStatus.SCHEDULED;
+}
+
+export async function scrapeNrlFixtures(season: number): Promise<FixtureRow[]> {
+  const url = `https://www.nrl.com/draw/?competition=111&season=${season}`;
+  const res = await axios.get(url, { timeout: 20000, headers: SCRAPER_HEADERS });
   const $ = cheerio.load(res.data);
   const rows: FixtureRow[] = [];
 
@@ -27,8 +42,11 @@ export async function scrapeNrlFixtures(url = "https://www.nrl.com/draw/"): Prom
     const homeTeamName = $(el).find("[data-testid='home-team-name'], .home-team .team-name").first().text().trim();
     const awayTeamName = $(el).find("[data-testid='away-team-name'], .away-team .team-name").first().text().trim();
     const kickoffRaw = $(el).find("time").attr("datetime") || $(el).find(".match-time").text().trim();
-    const venue = $(el).find(".match-venue").text().trim() || undefined;
-    const roundRaw = $(el).find(".round, [data-testid='round-number']").text().replace(/[^0-9]/g, "");
+    const venue = $(el).find(".match-venue, [data-testid='match-venue']").first().text().trim() || undefined;
+    const roundRaw = $(el).find(".round, [data-testid='round-number'], [data-testid='round-title']").text().replace(/[^0-9]/g, "");
+    const statusRaw = $(el).find("[data-testid='match-status'], .match-status").first().text().trim();
+    const homeScoreRaw = $(el).find("[data-testid='home-team-score'], .home-team .score").first().text().trim();
+    const awayScoreRaw = $(el).find("[data-testid='away-team-score'], .away-team .score").first().text().trim();
     const href = $(el).find("a").attr("href") || "";
 
     if (!homeTeamName || !awayTeamName || !kickoffRaw) return;
@@ -36,14 +54,21 @@ export async function scrapeNrlFixtures(url = "https://www.nrl.com/draw/"): Prom
     const kickoffAt = new Date(kickoffRaw);
     if (Number.isNaN(kickoffAt.valueOf())) return;
 
+    const homeScore = homeScoreRaw ? Number(homeScoreRaw) : undefined;
+    const awayScore = awayScoreRaw ? Number(awayScoreRaw) : undefined;
+
     rows.push({
       externalId: href || `${homeTeamName}-${awayTeamName}-${kickoffAt.toISOString()}`,
+      season,
       round: Number(roundRaw) || 0,
       kickoffAt,
       homeTeamName,
       awayTeamName,
       venue,
-      sourceUrl: href.startsWith("http") ? href : `https://www.nrl.com${href}`
+      sourceUrl: href.startsWith("http") ? href : `https://www.nrl.com${href}`,
+      status: parseStatus(statusRaw),
+      homeScore: Number.isFinite(homeScore) ? homeScore : undefined,
+      awayScore: Number.isFinite(awayScore) ? awayScore : undefined
     });
   });
 

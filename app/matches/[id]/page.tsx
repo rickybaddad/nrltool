@@ -9,12 +9,12 @@ export default async function MatchDetail({ params }: { params: Promise<{ id: st
       homeTeam: true,
       awayTeam: true,
       oddsSnapshots: { orderBy: { fetchedAt: "desc" }, take: 10 },
-      predictions: { orderBy: { generatedAt: "desc" }, take: 1 }
+      predictions: { orderBy: { generatedAt: "desc" }, take: 5 }
     }
   });
   if (!match) notFound();
 
-  const prediction = match.predictions[0];
+  const prediction = match.predictions.find((p) => p.usedForEvaluation) ?? match.predictions[0];
   const homeLast5 = await prisma.match.findMany({ where: { OR: [{ homeTeamId: match.homeTeamId }, { awayTeamId: match.homeTeamId }], status: "FINISHED" }, orderBy: { kickoffAt: "desc" }, take: 5 });
 
   return (
@@ -24,6 +24,8 @@ export default async function MatchDetail({ params }: { params: Promise<{ id: st
 
       <section className="mt-6 rounded border border-slate-700 p-4">
         <h2 className="mb-2 font-semibold">Probability Breakdown</h2>
+        <p>Predicted Winner: {prediction?.predictedWinnerTeamId === match.homeTeamId ? match.homeTeam.shortName : prediction?.predictedWinnerTeamId === match.awayTeamId ? match.awayTeam.shortName : "No clear prediction"}</p>
+        <p>Result: {prediction?.resultType ?? "Not evaluated"}</p>
         <p>Model Home: {prediction ? `${(prediction.modelHomeProbability * 100).toFixed(1)}%` : "N/A"}</p>
         <p>Market Home: {prediction?.marketHomeProbability != null ? `${(prediction.marketHomeProbability * 100).toFixed(1)}%` : "N/A"}</p>
         <p>Home Edge: {prediction?.homeEdge != null ? `${(prediction.homeEdge * 100).toFixed(1)}%` : "N/A"}</p>

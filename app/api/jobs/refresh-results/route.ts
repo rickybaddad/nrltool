@@ -5,8 +5,8 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
     const season = Number(body?.season) || new Date().getUTCFullYear();
-    const { runImportOdds } = await import("@/lib/jobs/pipeline");
-    const result = await runImportOdds(season);
+    const { runRefreshResults } = await import("@/lib/jobs/pipeline");
+    const result = await runRefreshResults(season);
     return NextResponse.json({ ok: true, season, result });
   } catch (error) {
     return NextResponse.json({ ok: false, error: getErrorMessage(error) }, { status: 500 });

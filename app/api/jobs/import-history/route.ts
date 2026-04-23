@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { runImportHistory } from "@/lib/jobs/pipeline";
 
 export async function POST() {
+  const { runImportHistory } = await import("@/lib/jobs/pipeline");
   const result = await runImportHistory();
   return NextResponse.json({ ok: true, result });
 }

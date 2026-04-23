@@ -84,6 +84,9 @@ function SyncProgress({
 }) {
   return (
     <div className="mt-3 rounded border border-slate-700 bg-slate-950 p-3 font-mono text-xs">
+      {lines.length === 0 && !finalStatus && (
+        <div className="text-slate-500">Connecting…</div>
+      )}
       {lines.map((line, i) => (
         <div
           key={i}
@@ -233,9 +236,10 @@ export function ManualJobControls() {
               {runningKey === job.key ? "Running..." : job.label}
             </button>
 
-            {job.key === "sync-season" && syncLines.length > 0 && (
-              <SyncProgress lines={syncLines} finalStatus={syncFinal} />
-            )}
+            {job.key === "sync-season" &&
+              (syncLines.length > 0 || syncFinal !== null || runningKey === "sync-season") && (
+                <SyncProgress lines={syncLines} finalStatus={syncFinal} />
+              )}
           </div>
         ))}
       </div>

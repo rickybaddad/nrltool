@@ -22,7 +22,7 @@ import {
   impliedProbability,
   normalizeProbabilities,
 } from "@/lib/utils/probability";
-import { resolveTeamId } from "@/lib/utils/team-resolver";
+import { resolveTeamId, normalizeName } from "@/lib/utils/team-resolver";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -97,6 +97,29 @@ async function upsertRound(seasonId: string, roundNumber: number): Promise<strin
   return round.id;
 }
 
+// Pre-load all teams + aliases into memory for O(1) name → id/slug lookups.
+type TeamInfo = { id: string; slug: string };
+async function buildTeamLookup(): Promise<Map<string, TeamInfo>> {
+  const teams = await prisma.team.findMany({ include: { aliases: true } });
+  const map = new Map<string, TeamInfo>();
+  for (const team of teams) {
+    const info = { id: team.id, slug: team.slug };
+    map.set(normalizeName(team.name), info);
+    map.set(normalizeName(team.shortName), info);
+    for (const alias of team.aliases) {
+      map.set(alias.normalized, info);
+    }
+  }
+  return map;
+}
+
+// Run async tasks in parallel batches to avoid overwhelming the connection pool.
+async function chunkAll<T>(items: T[], fn: (item: T) => Promise<void>, size = 10) {
+  for (let i = 0; i < items.length; i += size) {
+    await Promise.all(items.slice(i, i + size).map(fn));
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Seed teams (delegates to seed.ts export)
 // ---------------------------------------------------------------------------
@@ -122,36 +145,42 @@ export async function runSeedTeams() {
 // ---------------------------------------------------------------------------
 
 export async function importFullSeasonSchedule(season: number) {
-  const fixtures = await scrapeNrlFixtures(season);
+  const [fixtures, teamLookup] = await Promise.all([
+    scrapeNrlFixtures(season),
+    buildTeamLookup(),
+  ]);
   const seasonId = await upsertSeason(season);
+
+  // Pre-upsert all unique rounds in parallel — eliminates per-fixture round queries.
+  const uniqueRounds = [...new Set(fixtures.map((f) => f.round).filter((r) => r > 0))];
+  const roundCache = new Map<number, string>();
+  await Promise.all(
+    uniqueRounds.map(async (roundNumber) => {
+      roundCache.set(roundNumber, await upsertRound(seasonId, roundNumber));
+    })
+  );
 
   const unmatched: Array<{ home: string; away: string }> = [];
   let written = 0;
 
-  for (const fixture of fixtures) {
-    const homeTeamId = await resolveTeamId(fixture.homeTeamName);
-    const awayTeamId = await resolveTeamId(fixture.awayTeamName);
-    if (!homeTeamId || !awayTeamId) {
-      unmatched.push({ home: fixture.homeTeamName, away: fixture.awayTeamName });
-      continue;
+  const valid = fixtures.filter((f) => {
+    const home = teamLookup.get(normalizeName(f.homeTeamName));
+    const away = teamLookup.get(normalizeName(f.awayTeamName));
+    if (!home || !away) {
+      unmatched.push({ home: f.homeTeamName, away: f.awayTeamName });
+      return false;
     }
+    return true;
+  });
 
-    const homeTeam = await prisma.team.findUnique({ where: { id: homeTeamId } });
-    const awayTeam = await prisma.team.findUnique({ where: { id: awayTeamId } });
-
-    const roundId =
-      fixture.round && fixture.round > 0
-        ? await upsertRound(seasonId, fixture.round)
-        : undefined;
-
-    const slug = homeTeam && awayTeam
-      ? generateMatchSlug(homeTeam.slug, awayTeam.slug, fixture.season, fixture.round)
-      : undefined;
-
-    const externalId = fixture.externalId;
+  await chunkAll(valid, async (fixture) => {
+    const home = teamLookup.get(normalizeName(fixture.homeTeamName))!;
+    const away = teamLookup.get(normalizeName(fixture.awayTeamName))!;
+    const roundId = fixture.round > 0 ? roundCache.get(fixture.round) : undefined;
+    const slug = generateMatchSlug(home.slug, away.slug, fixture.season, fixture.round);
 
     await prisma.match.upsert({
-      where: { externalId },
+      where: { externalId: fixture.externalId },
       update: {
         season: fixture.season,
         round: fixture.round,
@@ -159,17 +188,17 @@ export async function importFullSeasonSchedule(season: number) {
         roundId,
         kickoffAt: fixture.kickoffAt,
         venue: fixture.venue,
-        source: "nrl.com",
+        source: "thesportsdb",
         sourceUrl: fixture.sourceUrl,
-        homeTeamId,
-        awayTeamId,
+        homeTeamId: home.id,
+        awayTeamId: away.id,
         status: fixture.status,
         homeScore: fixture.homeScore ?? null,
         awayScore: fixture.awayScore ?? null,
-        ...(slug ? { slug } : {}),
+        slug,
       },
       create: {
-        externalId,
+        externalId: fixture.externalId,
         slug,
         season: fixture.season,
         round: fixture.round,
@@ -177,17 +206,17 @@ export async function importFullSeasonSchedule(season: number) {
         roundId,
         kickoffAt: fixture.kickoffAt,
         venue: fixture.venue,
-        source: "nrl.com",
+        source: "thesportsdb",
         sourceUrl: fixture.sourceUrl,
-        homeTeamId,
-        awayTeamId,
+        homeTeamId: home.id,
+        awayTeamId: away.id,
         status: fixture.status,
         homeScore: fixture.homeScore ?? null,
         awayScore: fixture.awayScore ?? null,
       },
     });
     written++;
-  }
+  });
 
   return { read: fixtures.length, written, unmatched };
 }
@@ -227,32 +256,44 @@ export async function runImportHistory(
   const unmatched: Array<{ season: number; home: string; away: string }> = [];
 
   try {
+    const teamLookup = await buildTeamLookup();
+
     for (let year = fromSeason; year <= toSeason; year++) {
       const rows = await scrapeRlpSeason(year);
       read += rows.length;
 
       const seasonId = await upsertSeason(year);
+      const roundCache = new Map<number, string>();
 
-      for (const row of rows) {
-        const homeTeamId = await resolveTeamId(row.homeTeamName);
-        const awayTeamId = await resolveTeamId(row.awayTeamName);
-        if (!homeTeamId || !awayTeamId) {
+      const valid = rows.filter((row) => {
+        const home = teamLookup.get(normalizeName(row.homeTeamName));
+        const away = teamLookup.get(normalizeName(row.awayTeamName));
+        if (!home || !away) {
           unmatched.push({ season: year, home: row.homeTeamName, away: row.awayTeamName });
-          continue;
+          return false;
         }
+        return true;
+      });
 
-        const roundId =
-          row.round && row.round > 0
-            ? await upsertRound(seasonId, row.round)
-            : undefined;
+      await chunkAll(valid, async (row) => {
+        const home = teamLookup.get(normalizeName(row.homeTeamName))!;
+        const away = teamLookup.get(normalizeName(row.awayTeamName))!;
+
+        let roundId: string | undefined;
+        if (row.round > 0) {
+          if (!roundCache.has(row.round)) {
+            roundCache.set(row.round, await upsertRound(seasonId, row.round));
+          }
+          roundId = roundCache.get(row.round);
+        }
 
         await prisma.match.upsert({
           where: {
             season_round_homeTeamId_awayTeamId_kickoffAt: {
               season: row.season,
               round: row.round,
-              homeTeamId,
-              awayTeamId,
+              homeTeamId: home.id,
+              awayTeamId: away.id,
               kickoffAt: row.date,
             },
           },
@@ -271,8 +312,8 @@ export async function runImportHistory(
             seasonId,
             roundId,
             kickoffAt: row.date,
-            homeTeamId,
-            awayTeamId,
+            homeTeamId: home.id,
+            awayTeamId: away.id,
             homeScore: row.homeScore,
             awayScore: row.awayScore,
             source: "rugbyleagueproject",
@@ -281,7 +322,7 @@ export async function runImportHistory(
           },
         });
         written++;
-      }
+      });
     }
 
     await finalizeRun(run.id, {

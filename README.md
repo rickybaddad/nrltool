@@ -72,7 +72,7 @@ If source site markup changes:
 
 ## Vercel Notes
 - No persistent workers required.
-- Optional cron schedules are in `vercel.json`.
+- Cron schedules are disabled by default; use **Settings → Manual job controls** to run maintenance jobs on demand.
 - All operations are serverless-safe and API-triggered.
 
 ## Testing

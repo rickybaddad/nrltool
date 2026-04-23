@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { env } from "@/lib/config/env";
+import { ManualJobControls } from "@/components/manual-job-controls";
 
 type SettingRow = {
   key: string;
@@ -79,6 +80,8 @@ export default function SettingsPage() {
           </tbody>
         </table>
       </section>
+
+      <ManualJobControls />
     </main>
   );
 }

@@ -1,6 +1,13 @@
 import axios from "axios";
 import * as cheerio from "cheerio";
 
+const SCRAPER_HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9"
+};
+
 export type FixtureRow = {
   externalId: string;
   round: number;
@@ -12,7 +19,7 @@ export type FixtureRow = {
 };
 
 export async function scrapeNrlFixtures(url = "https://www.nrl.com/draw/"): Promise<FixtureRow[]> {
-  const res = await axios.get(url, { timeout: 15000 });
+  const res = await axios.get(url, { timeout: 15000, headers: SCRAPER_HEADERS });
   const $ = cheerio.load(res.data);
   const rows: FixtureRow[] = [];
 

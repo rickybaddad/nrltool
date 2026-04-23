@@ -1,6 +1,13 @@
 import axios from "axios";
 import * as cheerio from "cheerio";
 
+const SCRAPER_HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9"
+};
+
 export type HistoryRow = {
   season: number;
   round: number;
@@ -14,7 +21,7 @@ export type HistoryRow = {
 
 export async function scrapeRlpSeason(season: number): Promise<HistoryRow[]> {
   const url = `https://www.rugbyleagueproject.org/seasons/nrl-${season}/summary.html`;
-  const res = await axios.get(url, { timeout: 20000 });
+  const res = await axios.get(url, { timeout: 20000, headers: SCRAPER_HEADERS });
   const $ = cheerio.load(res.data);
   const rows: HistoryRow[] = [];
 

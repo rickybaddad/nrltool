@@ -7,7 +7,9 @@ import {
   runCalculateRatings,
   generatePredictions,
   evaluatePredictions,
+  runSeedTeams,
 } from "@/lib/jobs/pipeline";
+import { prisma } from "@/lib/db/prisma";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -35,14 +37,31 @@ export async function GET(request: NextRequest) {
         controller.enqueue(new TextEncoder().encode(encode(event)));
 
       try {
+        // 0. Auto-seed teams if table is empty
+        const teamCount = await prisma.team.count();
+        if (teamCount === 0) {
+          send({ step: "Seeding teams", status: "running" });
+          await runSeedTeams();
+          send({ step: "Seeding teams", status: "done", detail: "16 NRL teams seeded" });
+        }
+
         // 1. Fixtures
         send({ step: "Importing fixtures", status: "running" });
         const fixtures = await importFullSeasonSchedule(season);
-        send({
-          step: "Importing fixtures",
-          status: "done",
-          detail: `${fixtures.written} upserted (${fixtures.read} from API)`,
-        });
+        if (fixtures.unmatched.length) {
+          const names = fixtures.unmatched.map((u) => u.home).join(", ");
+          send({
+            step: "Importing fixtures",
+            status: "skipped",
+            reason: `${fixtures.written}/${fixtures.read} upserted — unmatched: ${names}`,
+          });
+        } else {
+          send({
+            step: "Importing fixtures",
+            status: "done",
+            detail: `${fixtures.written} upserted (${fixtures.read} from API)`,
+          });
+        }
 
         // 2. Results
         send({ step: "Refreshing results", status: "running" });

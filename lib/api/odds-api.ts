@@ -20,7 +20,7 @@ export async function fetchOdds(): Promise<OddsApiGame[]> {
     oddsFormat: "decimal"
   });
 
-  const res = await fetch(`https://api.the-odds-api.com/v4/sports/rugby_league_nrl/odds?${params.toString()}`, { cache: "no-store" });
+  const res = await fetch(`https://api.the-odds-api.com/v4/sports/rugbyleague_nrl/odds?${params.toString()}`, { cache: "no-store" });
   if (!res.ok) {
     const body = (await res.text()).trim();
     const detail = body.length ? ` - ${body}` : "";

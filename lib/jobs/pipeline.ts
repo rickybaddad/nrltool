@@ -311,63 +311,23 @@ export async function runImportHistory(
 // ---------------------------------------------------------------------------
 
 export async function refreshMatchResults(season: number) {
-  const rows = await scrapeRlpSeason(season);
-  const unmatched: Array<{ home: string; away: string }> = [];
+  const fixtures = await scrapeNrlFixtures(season);
+  const finished = fixtures.filter((f) => f.status === MatchStatus.FINISHED);
   let written = 0;
 
-  const seasonId = await upsertSeason(season);
-
-  for (const row of rows) {
-    const homeTeamId = await resolveTeamId(row.homeTeamName);
-    const awayTeamId = await resolveTeamId(row.awayTeamName);
-    if (!homeTeamId || !awayTeamId) {
-      unmatched.push({ home: row.homeTeamName, away: row.awayTeamName });
-      continue;
-    }
-
-    const roundId =
-      row.round && row.round > 0
-        ? await upsertRound(seasonId, row.round)
-        : undefined;
-
-    await prisma.match.upsert({
-      where: {
-        season_round_homeTeamId_awayTeamId_kickoffAt: {
-          season,
-          round: row.round,
-          homeTeamId,
-          awayTeamId,
-          kickoffAt: row.date,
-        },
-      },
-      update: {
+  for (const fixture of finished) {
+    const updated = await prisma.match.updateMany({
+      where: { externalId: fixture.externalId },
+      data: {
         status: MatchStatus.FINISHED,
-        homeScore: row.homeScore,
-        awayScore: row.awayScore,
-        source: "rugbyleagueproject",
-        sourceUrl: row.sourceUrl,
-        seasonId,
-        roundId,
-      },
-      create: {
-        season,
-        round: row.round,
-        seasonId,
-        roundId,
-        kickoffAt: row.date,
-        homeTeamId,
-        awayTeamId,
-        status: MatchStatus.FINISHED,
-        homeScore: row.homeScore,
-        awayScore: row.awayScore,
-        source: "rugbyleagueproject",
-        sourceUrl: row.sourceUrl,
+        homeScore: fixture.homeScore ?? null,
+        awayScore: fixture.awayScore ?? null,
       },
     });
-    written++;
+    written += updated.count;
   }
 
-  return { read: rows.length, written, unmatched };
+  return { read: finished.length, written };
 }
 
 export async function runRefreshResults(season = getYear(new Date())) {

@@ -1,12 +1,31 @@
 import axios from "axios";
-import * as cheerio from "cheerio";
 import { MatchStatus } from "@prisma/client";
 
-const SCRAPER_HEADERS = {
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
-  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-  "Accept-Language": "en-US,en;q=0.9"
+const SPORTSDB_BASE = "https://www.thesportsdb.com/api/v1/json/3";
+const NRL_LEAGUE_ID = "4416";
+
+const SPORTSDB_HEADERS = {
+  "User-Agent": "nrltool/1.0",
+  Accept: "application/json",
+};
+
+// TheSportsDB returns numeric fields as strings despite the "int" prefix
+type SportsDbEvent = {
+  idEvent: string;
+  strEvent: string;
+  intRound: string | null;
+  strHomeTeam: string;
+  strAwayTeam: string;
+  idHomeTeam: string;
+  idAwayTeam: string;
+  intHomeScore: string | null;
+  intAwayScore: string | null;
+  strVenue: string | null;
+  strTimestamp: string | null;
+  dateEvent: string | null;
+  strTime: string | null;
+  strStatus: string | null;
+  strPostponed: string | null;
 };
 
 export type FixtureRow = {
@@ -23,54 +42,62 @@ export type FixtureRow = {
   awayScore?: number;
 };
 
-function parseStatus(raw: string): MatchStatus {
-  const value = raw.toLowerCase();
-  if (value.includes("full time") || value.includes("finished")) return MatchStatus.FINISHED;
-  if (value.includes("live")) return MatchStatus.LIVE;
-  if (value.includes("postpon")) return MatchStatus.POSTPONED;
-  if (value.includes("cancel")) return MatchStatus.CANCELLED;
+function parseStatus(strStatus: string | null, strPostponed: string | null): MatchStatus {
+  if (strPostponed === "yes") return MatchStatus.POSTPONED;
+  const s = (strStatus ?? "").toUpperCase();
+  if (["FT", "AET", "AP", "AWD", "WO"].includes(s)) return MatchStatus.FINISHED;
+  if (["1H", "2H", "HT", "ET", "P", "LIVE"].includes(s)) return MatchStatus.LIVE;
+  if (["PPD"].includes(s)) return MatchStatus.POSTPONED;
+  if (["CANC", "ABD"].includes(s)) return MatchStatus.CANCELLED;
   return MatchStatus.SCHEDULED;
 }
 
+function parseKickoff(event: SportsDbEvent): Date | null {
+  // strTimestamp is ISO 8601 UTC — most reliable
+  if (event.strTimestamp) {
+    const d = new Date(event.strTimestamp);
+    if (!Number.isNaN(d.valueOf())) return d;
+  }
+  // Fallback: dateEvent + strTime (treated as UTC)
+  if (event.dateEvent && event.strTime) {
+    const d = new Date(`${event.dateEvent}T${event.strTime}Z`);
+    if (!Number.isNaN(d.valueOf())) return d;
+  }
+  return null;
+}
+
 export async function scrapeNrlFixtures(season: number): Promise<FixtureRow[]> {
-  const url = `https://www.nrl.com/draw/?competition=111&season=${season}`;
-  const res = await axios.get(url, { timeout: 20000, headers: SCRAPER_HEADERS });
-  const $ = cheerio.load(res.data);
+  const url = `${SPORTSDB_BASE}/eventsseason.php?id=${NRL_LEAGUE_ID}&s=${season}`;
+  const res = await axios.get<{ events: SportsDbEvent[] | null }>(url, {
+    headers: SPORTSDB_HEADERS,
+    timeout: 20000,
+  });
+
+  const events = res.data?.events ?? [];
   const rows: FixtureRow[] = [];
 
-  $("[data-testid='draw-match-card'], .match-card, .u-match-card").each((_, el) => {
-    const homeTeamName = $(el).find("[data-testid='home-team-name'], .home-team .team-name").first().text().trim();
-    const awayTeamName = $(el).find("[data-testid='away-team-name'], .away-team .team-name").first().text().trim();
-    const kickoffRaw = $(el).find("time").attr("datetime") || $(el).find(".match-time").text().trim();
-    const venue = $(el).find(".match-venue, [data-testid='match-venue']").first().text().trim() || undefined;
-    const roundRaw = $(el).find(".round, [data-testid='round-number'], [data-testid='round-title']").text().replace(/[^0-9]/g, "");
-    const statusRaw = $(el).find("[data-testid='match-status'], .match-status").first().text().trim();
-    const homeScoreRaw = $(el).find("[data-testid='home-team-score'], .home-team .score").first().text().trim();
-    const awayScoreRaw = $(el).find("[data-testid='away-team-score'], .away-team .score").first().text().trim();
-    const href = $(el).find("a").attr("href") || "";
+  for (const ev of events) {
+    const kickoffAt = parseKickoff(ev);
+    if (!kickoffAt) continue;
 
-    if (!homeTeamName || !awayTeamName || !kickoffRaw) return;
-
-    const kickoffAt = new Date(kickoffRaw);
-    if (Number.isNaN(kickoffAt.valueOf())) return;
-
-    const homeScore = homeScoreRaw ? Number(homeScoreRaw) : undefined;
-    const awayScore = awayScoreRaw ? Number(awayScoreRaw) : undefined;
+    const round = Number(ev.intRound ?? 0);
+    const homeScore = ev.intHomeScore != null ? Number(ev.intHomeScore) : undefined;
+    const awayScore = ev.intAwayScore != null ? Number(ev.intAwayScore) : undefined;
 
     rows.push({
-      externalId: href || `${homeTeamName}-${awayTeamName}-${kickoffAt.toISOString()}`,
+      externalId: `sportsdb-${ev.idEvent}`,
       season,
-      round: Number(roundRaw) || 0,
+      round,
       kickoffAt,
-      homeTeamName,
-      awayTeamName,
-      venue,
-      sourceUrl: href.startsWith("http") ? href : `https://www.nrl.com${href}`,
-      status: parseStatus(statusRaw),
+      homeTeamName: ev.strHomeTeam,
+      awayTeamName: ev.strAwayTeam,
+      venue: ev.strVenue ?? undefined,
+      sourceUrl: `https://www.thesportsdb.com/event/${ev.idEvent}`,
+      status: parseStatus(ev.strStatus, ev.strPostponed),
       homeScore: Number.isFinite(homeScore) ? homeScore : undefined,
-      awayScore: Number.isFinite(awayScore) ? awayScore : undefined
+      awayScore: Number.isFinite(awayScore) ? awayScore : undefined,
     });
-  });
+  }
 
   return rows;
 }

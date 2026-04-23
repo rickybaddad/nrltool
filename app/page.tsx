@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db/prisma";
 import { MatchCard } from "@/components/match-card";
+import type { Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
 
@@ -11,15 +12,27 @@ function sortPredictions<T extends { kickoffAt: Date; homeEdge: number | null; c
 
 export default async function Home({ searchParams }: { searchParams?: Promise<{ sort?: string }> }) {
   const sort = (await searchParams)?.sort ?? "time";
-  const predictions = await prisma.prediction.findMany({
-    include: {
-      match: true,
-      homeTeam: true,
-      awayTeam: true
-    },
-    orderBy: { generatedAt: "desc" },
-    take: 50
-  });
+  type PredictionWithRelations = Prisma.PredictionGetPayload<{
+    include: { match: true; homeTeam: true; awayTeam: true };
+  }>;
+
+  let predictions: PredictionWithRelations[] = [];
+  let loadError: string | null = null;
+
+  try {
+    predictions = await prisma.prediction.findMany({
+      include: {
+        match: true,
+        homeTeam: true,
+        awayTeam: true
+      },
+      orderBy: { generatedAt: "desc" },
+      take: 50
+    });
+  } catch (error) {
+    console.error("Failed to load predictions", error);
+    loadError = "Predictions are temporarily unavailable. Please check your database connection and try again.";
+  }
 
   const newestByMatch = Array.from(new Map(predictions.map((p) => [p.matchId, p])).values()).filter((p) => p.match.kickoffAt >= new Date());
   const sorted = sortPredictions(newestByMatch.map((p) => ({ ...p, kickoffAt: p.match.kickoffAt })), sort);
@@ -33,6 +46,9 @@ export default async function Home({ searchParams }: { searchParams?: Promise<{ 
         <a href="/?sort=confidence" className="rounded bg-slate-800 px-3 py-1">Sort: Confidence</a>
         <a href="/settings" className="rounded bg-slate-700 px-3 py-1">Settings</a>
       </div>
+      {loadError ? (
+        <p className="mb-4 rounded border border-amber-500/40 bg-amber-900/20 px-3 py-2 text-sm text-amber-200">{loadError}</p>
+      ) : null}
       <div className="grid gap-4">
         {sorted.map((p) => (
           <MatchCard

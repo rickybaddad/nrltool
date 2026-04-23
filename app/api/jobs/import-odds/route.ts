@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { runImportOdds } from "@/lib/jobs/pipeline";
 
 export async function POST() {
+  const { runImportOdds } = await import("@/lib/jobs/pipeline");
   const result = await runImportOdds();
   return NextResponse.json({ ok: true, result });
 }

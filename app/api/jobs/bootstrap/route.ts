@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
-import { runBootstrap } from "@/lib/jobs/pipeline";
-import { runSeedTeams } from "@/lib/jobs/seed-teams";
 
 export async function POST() {
+  const [{ runSeedTeams }, { runBootstrap }] = await Promise.all([
+    import("@/lib/jobs/seed-teams"),
+    import("@/lib/jobs/pipeline")
+  ]);
+
   const seeded = await runSeedTeams();
   const result = await runBootstrap();
   return NextResponse.json({ ok: true, seeded, result });

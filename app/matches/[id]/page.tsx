@@ -1,6 +1,10 @@
 import { redirect } from "next/navigation";
 
-// Redirect legacy /matches/[id] URLs to the canonical /match/[slug] path.
-export default function LegacyMatchPage({ params }: { params: { id: string } }) {
-  redirect(`/match/${params.id}`);
+export default async function LegacyMatchPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  redirect(`/match/${id}`);
 }

@@ -152,7 +152,7 @@ export async function importFullSeasonSchedule(season: number) {
   const seasonId = await upsertSeason(season);
 
   // Pre-upsert all unique rounds in parallel — eliminates per-fixture round queries.
-  const uniqueRounds = [...new Set(fixtures.map((f) => f.round).filter((r) => r > 0))];
+  const uniqueRounds = [...new Set(fixtures.map((f) => f.round).filter((r): r is number => r != null && r > 0))];
   const roundCache = new Map<number, string>();
   await Promise.all(
     uniqueRounds.map(async (roundNumber) => {
@@ -176,7 +176,7 @@ export async function importFullSeasonSchedule(season: number) {
   await chunkAll(valid, async (fixture) => {
     const home = teamLookup.get(normalizeName(fixture.homeTeamName))!;
     const away = teamLookup.get(normalizeName(fixture.awayTeamName))!;
-    const roundId = fixture.round > 0 ? roundCache.get(fixture.round) : undefined;
+    const roundId = fixture.round != null && fixture.round > 0 ? roundCache.get(fixture.round) : undefined;
     const slug = generateMatchSlug(home.slug, away.slug, fixture.season, fixture.round);
 
     await prisma.match.upsert({

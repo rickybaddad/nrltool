@@ -27,7 +27,7 @@ type SportsDbEvent = {
 export type FixtureRow = {
   externalId: string;
   season: number;
-  round: number;
+  round: number | null;
   kickoffAt: Date;
   homeTeamName: string;
   awayTeamName: string;
@@ -65,10 +65,10 @@ export async function scrapeNrlFixtures(season: number): Promise<FixtureRow[]> {
   const rows: FixtureRow[] = [];
 
   for (const ev of events) {
-    const round = Number(ev.intRound ?? 0);
-
-    // TheSportsDB encodes finals/special rounds as 500+ — skip them
-    if (round === 0 || round > 30) continue;
+    const rawRound = Number(ev.intRound ?? 0);
+    // Valid NRL regular-season rounds are 1–27; anything outside that
+    // (0, 500, etc.) means TheSportsDB hasn't assigned a round yet.
+    const round: number | null = rawRound >= 1 && rawRound <= 27 ? rawRound : null;
 
     const kickoffAt = parseKickoff(ev);
     if (!kickoffAt) continue;
@@ -99,7 +99,7 @@ export async function scrapeNrlFixtures(season: number): Promise<FixtureRow[]> {
     rows.push({
       externalId: `sportsdb-${ev.idEvent}`,
       season,
-      round,
+      round,  // null when TheSportsDB hasn't assigned a round yet
       kickoffAt,
       homeTeamName,
       awayTeamName,

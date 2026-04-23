@@ -335,11 +335,11 @@ export async function runRefreshResults(season = getYear(new Date())) {
   try {
     const result = await refreshMatchResults(season);
     await finalizeRun(run.id, {
-      status: result.unmatched.length ? ImportRunStatus.PARTIAL : ImportRunStatus.SUCCESS,
+      status: ImportRunStatus.SUCCESS,
       message: `Results refreshed for ${season}`,
       recordsRead: result.read,
       recordsWritten: result.written,
-      metadata: { unmatched: result.unmatched, season },
+      metadata: { season },
     });
     return result;
   } catch (error) {

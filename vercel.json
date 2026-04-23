@@ -1,0 +1,16 @@
+{
+  "crons": [
+    {
+      "path": "/api/jobs/bootstrap",
+      "schedule": "0 8 * * 1"
+    },
+    {
+      "path": "/api/jobs/import-odds",
+      "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/jobs/generate-predictions",
+      "schedule": "5 */6 * * *"
+    }
+  ]
+}

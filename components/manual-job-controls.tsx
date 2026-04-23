@@ -7,26 +7,46 @@ type Job = {
   label: string;
   path: string;
   description: string;
+  body?: Record<string, unknown>;
 };
+
+const currentSeason = new Date().getUTCFullYear();
 
 const manualJobs: Job[] = [
   {
-    key: "bootstrap",
-    label: "Run bootstrap",
-    path: "/api/jobs/bootstrap",
-    description: "Runs the full pipeline: history import, ratings, fixtures, odds, and predictions."
+    key: "sync-season",
+    label: "Sync current season",
+    path: "/api/jobs/sync-season",
+    body: { season: currentSeason },
+    description: "Imports the full schedule, refreshes results, updates odds, generates upcoming predictions, and evaluates completed matches."
   },
   {
-    key: "import-odds",
-    label: "Import odds",
-    path: "/api/jobs/import-odds",
-    description: "Fetches latest bookmaker prices for the current week and stores new snapshots."
+    key: "import-season-schedule",
+    label: "Import season schedule",
+    path: "/api/jobs/import-season-schedule",
+    body: { season: currentSeason },
+    description: "Fetches and upserts the full fixture list for the selected season."
   },
   {
-    key: "generate-predictions",
-    label: "Generate predictions",
+    key: "refresh-results",
+    label: "Refresh results",
+    path: "/api/jobs/refresh-results",
+    body: { season: currentSeason },
+    description: "Updates completed match scores and statuses for the season."
+  },
+  {
+    key: "generate-round-predictions",
+    label: "Generate upcoming predictions",
     path: "/api/jobs/generate-predictions",
-    description: "Creates fresh model predictions using the latest ratings and odds snapshots."
+    body: { season: currentSeason, upcomingOnly: true },
+    description: "Creates pre-match prediction snapshots for upcoming matches that do not yet have a valid pre-kickoff prediction."
+  },
+  {
+    key: "evaluate-predictions",
+    label: "Evaluate predictions",
+    path: "/api/jobs/evaluate-predictions",
+    body: { season: currentSeason },
+    description: "Grades completed matches against the final pre-match prediction generated before kickoff."
   }
 ];
 
@@ -39,7 +59,11 @@ export function ManualJobControls() {
     setStatus(`Running ${job.label.toLowerCase()}...`);
 
     try {
-      const res = await fetch(job.path, { method: "POST" });
+      const res = await fetch(job.path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(job.body ?? {})
+      });
       const payload = await res.json().catch(() => null);
       if (!res.ok) {
         const apiError = payload && typeof payload.error === "string" ? payload.error : `${res.status} ${res.statusText}`;
@@ -59,7 +83,7 @@ export function ManualJobControls() {
     <section className="mt-8 rounded border border-slate-700 p-4">
       <h2 className="text-xl font-semibold">Manual job controls</h2>
       <p className="mt-2 text-sm text-slate-300">
-        Cron schedules are disabled. Use these actions whenever you want to run the background jobs manually.
+        Trigger idempotent serverless jobs manually. These are season-aware and safe to rerun.
       </p>
 
       <div className="mt-4 space-y-3">

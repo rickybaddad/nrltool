@@ -27,10 +27,11 @@ export default async function Home({ searchParams }: { searchParams?: Promise<{ 
   return (
     <main className="mx-auto max-w-5xl p-6">
       <h1 className="mb-6 text-4xl font-bold">NRL Model</h1>
-      <div className="mb-4 flex gap-2 text-sm">
+      <div className="mb-4 flex flex-wrap gap-2 text-sm">
         <a href="/?sort=time" className="rounded bg-slate-800 px-3 py-1">Sort: Time</a>
         <a href="/?sort=edge" className="rounded bg-slate-800 px-3 py-1">Sort: Biggest Edge</a>
         <a href="/?sort=confidence" className="rounded bg-slate-800 px-3 py-1">Sort: Confidence</a>
+        <a href="/settings" className="rounded bg-slate-700 px-3 py-1">Settings</a>
       </div>
       <div className="grid gap-4">
         {sorted.map((p) => (

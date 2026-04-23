@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
+import { getErrorMessage } from "@/lib/utils/error-message";
 
 export async function POST() {
-  const { runImportOdds } = await import("@/lib/jobs/pipeline");
-  const result = await runImportOdds();
-  return NextResponse.json({ ok: true, result });
+  try {
+    const { runImportOdds } = await import("@/lib/jobs/pipeline");
+    const result = await runImportOdds();
+    return NextResponse.json({ ok: true, result });
+  } catch (error) {
+    return NextResponse.json({ ok: false, error: `Import odds failed: ${getErrorMessage(error)}` }, { status: 500 });
+  }
 }

@@ -40,7 +40,11 @@ export function ManualJobControls() {
 
     try {
       const res = await fetch(job.path, { method: "POST" });
-      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) {
+        const apiError = payload && typeof payload.error === "string" ? payload.error : `${res.status} ${res.statusText}`;
+        throw new Error(apiError);
+      }
 
       setStatus(`${job.label} completed successfully.`);
     } catch (error) {

@@ -3,9 +3,14 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
 
 enum MatchStatus {
   SCHEDULED
@@ -34,16 +39,6 @@ enum ImportRunType {
   EVALUATE_PREDICTIONS
 }
 
-enum PredictionType {
-  PRE_MATCH
-}
-
-enum PredictionScope {
-  ROUND_VIEW
-  SCHEDULED_RUN
-  SEASON_SYNC
-}
-
 enum PredictionResultType {
   WIN
   LOSS
@@ -52,11 +47,15 @@ enum PredictionResultType {
   NO_PREDICTION
 }
 
+// ---------------------------------------------------------------------------
+// Team & aliases
+// ---------------------------------------------------------------------------
+
 model Team {
   id              String               @id @default(cuid())
-  slug            String               @unique
-  fullName        String               @unique
+  name            String               @unique
   shortName       String               @unique
+  slug            String               @unique
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
   aliases         TeamAlias[]
@@ -73,133 +72,211 @@ model Team {
 
 model TeamAlias {
   id         String   @id @default(cuid())
+  teamId     String
+  source     String   @default("seed")
   alias      String   @unique
   normalized String
-  source     String
-  teamId     String
   createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
   team       Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
 
   @@index([normalized])
   @@index([teamId])
 }
 
+// ---------------------------------------------------------------------------
+// Season & Round
+// ---------------------------------------------------------------------------
+
+model Season {
+  id        String   @id @default(cuid())
+  year      Int      @unique
+  isActive  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  rounds    Round[]
+  matches   Match[]
+}
+
+model Round {
+  id          String    @id @default(cuid())
+  seasonId    String
+  roundNumber Int
+  name        String?
+  startDate   DateTime?
+  endDate     DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  season      Season    @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  matches     Match[]
+
+  @@unique([seasonId, roundNumber])
+  @@index([seasonId])
+}
+
+// ---------------------------------------------------------------------------
+// Match
+// ---------------------------------------------------------------------------
+
 model Match {
-  id             String               @id @default(cuid())
-  externalId     String?              @unique
-  season         Int
-  round          Int?
-  kickoffAt      DateTime
-  venue          String?
-  status         MatchStatus          @default(SCHEDULED)
-  source         String
-  sourceUrl      String?
-  homeTeamId     String
-  awayTeamId     String
-  homeScore      Int?
-  awayScore      Int?
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
-  homeTeam       Team                 @relation("HomeTeam", fields: [homeTeamId], references: [id], onDelete: Restrict)
-  awayTeam       Team                 @relation("AwayTeam", fields: [awayTeamId], references: [id], onDelete: Restrict)
-  oddsSnapshots  OddsSnapshot[]
-  predictions    Prediction[]
+  id          String      @id @default(cuid())
+  slug        String?     @unique
+  externalId  String?     @unique
+  source      String      @default("nrl.com")
+  sourceUrl   String?
+  // Denormalised integers kept for fast filtering without joins
+  season      Int
+  round       Int?
+  // FK references to Season / Round (populated on import)
+  seasonId    String?
+  roundId     String?
+  kickoffAt   DateTime
+  venue       String?
+  homeTeamId  String
+  awayTeamId  String
+  homeScore   Int?
+  awayScore   Int?
+  status      MatchStatus @default(SCHEDULED)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  homeTeam        Team                 @relation("HomeTeam", fields: [homeTeamId], references: [id], onDelete: Restrict)
+  awayTeam        Team                 @relation("AwayTeam", fields: [awayTeamId], references: [id], onDelete: Restrict)
+  seasonRef       Season?              @relation(fields: [seasonId], references: [id])
+  roundRef        Round?               @relation(fields: [roundId], references: [id])
+  oddsSnapshots   OddsSnapshot[]
+  predictions     Prediction[]
   ratingSnapshots TeamRatingSnapshot[]
 
   @@unique([season, round, homeTeamId, awayTeamId, kickoffAt])
   @@index([kickoffAt])
   @@index([status])
   @@index([season, round])
+  @@index([seasonId])
+  @@index([roundId])
 }
+
+// ---------------------------------------------------------------------------
+// TeamRatingSnapshot
+// ---------------------------------------------------------------------------
 
 model TeamRatingSnapshot {
   id           String   @id @default(cuid())
   teamId       String
-  matchId      String?
+  seasonId     String?
   season       Int
   ratingBefore Float
   ratingAfter  Float
+  ratingSystem String   @default("elo-v1")
+  asOfDate     DateTime @default(now())
+  sourceMatchId String?
   createdAt    DateTime @default(now())
   team         Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  match        Match?   @relation(fields: [matchId], references: [id], onDelete: SetNull)
+  match        Match?   @relation(fields: [sourceMatchId], references: [id], onDelete: SetNull)
 
   @@index([teamId, createdAt])
   @@index([season])
+  @@index([seasonId])
 }
+
+// ---------------------------------------------------------------------------
+// OddsSnapshot
+// ---------------------------------------------------------------------------
 
 model OddsSnapshot {
-  id                    String   @id @default(cuid())
-  matchId               String
-  bookmakerKey          String
-  bookmakerTitle        String
-  marketKey             String
-  homeTeamId            String
-  awayTeamId            String
-  homePrice             Float
-  awayPrice             Float
-  homeImpliedProbability Float
-  awayImpliedProbability Float
-  homeNormalizedProb    Float
-  awayNormalizedProb    Float
-  overround             Float
-  fetchedAt             DateTime @default(now())
-  createdAt             DateTime @default(now())
+  id                   String   @id @default(cuid())
+  matchId              String
+  source               String   @default("the-odds-api")
+  bookmaker            String
+  bookmakerTitle       String
+  marketType           String   @default("h2h")
+  homeTeamId           String
+  awayTeamId           String
+  homeOdds             Float?
+  awayOdds             Float?
+  drawOdds             Float?
+  homeImpliedRaw       Float?
+  awayImpliedRaw       Float?
+  drawImpliedRaw       Float?
+  homeImpliedNormalized Float?
+  awayImpliedNormalized Float?
+  drawImpliedNormalized Float?
+  overround            Float?
+  pulledAt             DateTime @default(now())
+  createdAt            DateTime @default(now())
 
-  match                 Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
-  homeTeam              Team     @relation("HomeOddsTeam", fields: [homeTeamId], references: [id], onDelete: Restrict)
-  awayTeam              Team     @relation("AwayOddsTeam", fields: [awayTeamId], references: [id], onDelete: Restrict)
+  match    Match @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  homeTeam Team  @relation("HomeOddsTeam", fields: [homeTeamId], references: [id], onDelete: Restrict)
+  awayTeam Team  @relation("AwayOddsTeam", fields: [awayTeamId], references: [id], onDelete: Restrict)
 
-  @@index([matchId, fetchedAt])
-  @@index([bookmakerKey, fetchedAt])
+  @@index([matchId, pulledAt])
+  @@index([bookmaker, pulledAt])
 }
+
+// ---------------------------------------------------------------------------
+// Prediction
+// ---------------------------------------------------------------------------
 
 model Prediction {
   id                    String               @id @default(cuid())
   matchId               String
   homeTeamId            String
   awayTeamId            String
-  modelHomeProbability  Float
-  modelAwayProbability  Float
+  modelVersion          String               @default("elo-v1")
+  generatedAt           DateTime             @default(now())
+  lockedAt              DateTime?
+  isLatest              Boolean              @default(false)
+  // Ratings used to generate this prediction
+  homeTeamRating        Float?
+  awayTeamRating        Float?
+  homeAdvantageApplied  Float?
+  eloDifference         Float?
+  // Model probabilities
+  homeWinProbability    Float
+  awayWinProbability    Float
+  // Market comparison
+  homeImpliedProbability Float?
+  awayImpliedProbability Float?
+  homeEdge              Float?
+  awayEdge              Float?
+  confidence            String               @default("Low")
+  selectedBookmaker     String?
+  // Outcome
   predictedWinnerTeamId String?
   actualWinnerTeamId    String?
   wasCorrect            Boolean?
   resultType            PredictionResultType?
-  selectedBookmaker     String?
-  marketHomeProbability Float?
-  marketAwayProbability Float?
-  homeEdge              Float?
-  awayEdge              Float?
-  confidence            String
-  predictionType        PredictionType       @default(PRE_MATCH)
-  predictionScope       PredictionScope      @default(SCHEDULED_RUN)
-  modelVersion          String               @default("elo-v1")
-  lockedAt              DateTime?
-  generatedAt           DateTime             @default(now())
   evaluatedAt           DateTime?
   usedForEvaluation     Boolean              @default(false)
   createdAt             DateTime             @default(now())
 
-  match                 Match                @relation(fields: [matchId], references: [id], onDelete: Cascade)
-  homeTeam              Team                 @relation("HomePredictionTeam", fields: [homeTeamId], references: [id], onDelete: Restrict)
-  awayTeam              Team                 @relation("AwayPredictionTeam", fields: [awayTeamId], references: [id], onDelete: Restrict)
+  match    Match @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  homeTeam Team  @relation("HomePredictionTeam", fields: [homeTeamId], references: [id], onDelete: Restrict)
+  awayTeam Team  @relation("AwayPredictionTeam", fields: [awayTeamId], references: [id], onDelete: Restrict)
 
   @@unique([matchId, generatedAt])
   @@index([matchId, generatedAt])
-  @@index([predictionType, predictionScope, generatedAt])
+  @@index([isLatest])
   @@index([usedForEvaluation])
+  @@index([generatedAt])
 }
 
+// ---------------------------------------------------------------------------
+// ImportRun
+// ---------------------------------------------------------------------------
+
 model ImportRun {
-  id             String          @id @default(cuid())
-  type           ImportRunType
-  status         ImportRunStatus
-  startedAt      DateTime        @default(now())
-  completedAt    DateTime?
-  message        String?
-  recordsRead    Int             @default(0)
-  recordsWritten Int             @default(0)
-  metadata       Json?
+  id               String          @id @default(cuid())
+  type             ImportRunType
+  status           ImportRunStatus
+  source           String?
+  startedAt        DateTime        @default(now())
+  completedAt      DateTime?
+  message          String?
+  recordsRead      Int             @default(0)
+  recordsWritten   Int             @default(0)
+  recordsProcessed Int             @default(0)
+  errorMessage     String?
+  metadata         Json?
 
   @@index([type, startedAt])
   @@index([status, startedAt])

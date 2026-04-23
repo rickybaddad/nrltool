@@ -1,85 +1,194 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db/prisma";
 import { MatchCard } from "@/components/match-card";
-import type { Prisma } from "@prisma/client";
+import { getErrorMessage } from "@/lib/utils/error-message";
 
 export const dynamic = "force-dynamic";
 
-function sortPredictions<T extends { kickoffAt: Date; homeEdge: number | null; confidence: string }>(arr: T[], sort: string) {
-  if (sort === "edge") return arr.sort((a, b) => Math.abs(b.homeEdge ?? 0) - Math.abs(a.homeEdge ?? 0));
-  if (sort === "confidence") return arr.sort((a, b) => b.confidence.localeCompare(a.confidence));
-  return arr.sort((a, b) => a.kickoffAt.getTime() - b.kickoffAt.getTime());
+const CURRENT_YEAR = new Date().getUTCFullYear();
+
+async function getDashboardData() {
+  const now = new Date();
+
+  const [upcomingPredictions, gradedPredictions, nextMatch, totalMatches] =
+    await Promise.all([
+      prisma.prediction.findMany({
+        where: {
+          isLatest: true,
+          match: { season: CURRENT_YEAR, kickoffAt: { gte: now } },
+        },
+        include: { match: true, homeTeam: true, awayTeam: true },
+        orderBy: { match: { kickoffAt: "asc" } },
+        take: 50,
+      }),
+      prisma.prediction.findMany({
+        where: { match: { season: CURRENT_YEAR }, usedForEvaluation: true },
+        select: { wasCorrect: true },
+      }),
+      prisma.match.findFirst({
+        where: { season: CURRENT_YEAR, kickoffAt: { gte: now } },
+        orderBy: { kickoffAt: "asc" },
+      }),
+      prisma.match.count({ where: { season: CURRENT_YEAR } }),
+    ]);
+
+  const correct = gradedPredictions.filter((p) => p.wasCorrect === true).length;
+  const accuracy =
+    gradedPredictions.length > 0
+      ? ((correct / gradedPredictions.length) * 100).toFixed(1)
+      : null;
+
+  const highEdge = upcomingPredictions.filter((p) => p.confidence === "High").length;
+
+  return {
+    upcomingPredictions,
+    gradedCount: gradedPredictions.length,
+    correct,
+    accuracy,
+    highEdge,
+    currentRound: nextMatch?.round ?? null,
+    totalMatches,
+  };
 }
 
-export default async function Home({ searchParams }: { searchParams?: Promise<{ sort?: string }> }) {
-  const sort = (await searchParams)?.sort ?? "time";
-  type PredictionWithRelations = Prisma.PredictionGetPayload<{
-    include: { match: true; homeTeam: true; awayTeam: true };
-  }>;
+function SummaryCard({
+  label,
+  value,
+  sub,
+}: {
+  label: string;
+  value: string | number;
+  sub?: string;
+}) {
+  return (
+    <div className="rounded-lg border border-slate-700 bg-slate-900 p-4">
+      <p className="text-xs uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="mt-1 text-3xl font-bold">{value}</p>
+      {sub && <p className="mt-0.5 text-xs text-slate-400">{sub}</p>}
+    </div>
+  );
+}
 
-  const now = new Date();
-  const currentSeason = now.getUTCFullYear();
-
-  let predictions: PredictionWithRelations[] = [];
+export default async function Home() {
+  let data;
   let loadError: string | null = null;
 
   try {
-    predictions = await prisma.prediction.findMany({
-      include: {
-        match: true,
-        homeTeam: true,
-        awayTeam: true
-      },
-      orderBy: { generatedAt: "desc" },
-      take: 200
-    });
+    data = await getDashboardData();
   } catch (error) {
-    console.error("Failed to load predictions", error);
-    loadError = "Predictions are temporarily unavailable. Please check your database connection and try again.";
+    loadError = getErrorMessage(error);
   }
 
-  const newestByMatch = Array.from(new Map(predictions.map((p) => [p.matchId, p])).values()).filter((p) => p.match.kickoffAt >= now);
-  const sorted = sortPredictions(newestByMatch.map((p) => ({ ...p, kickoffAt: p.match.kickoffAt })), sort);
-
-  const currentRoundMatch = await prisma.match.findFirst({
-    where: { season: currentSeason, kickoffAt: { gte: now } },
-    orderBy: { kickoffAt: "asc" }
-  });
-
-  const currentRound = currentRoundMatch?.round ?? 1;
-
   return (
-    <main className="mx-auto max-w-5xl p-6">
-      <h1 className="mb-3 text-4xl font-bold">NRL Model</h1>
-      <p className="mb-4 text-sm text-slate-300">Season-aware dashboard for full-year fixture tracking, predictions, and graded outcomes.</p>
+    <div className="mx-auto max-w-6xl px-4 py-8">
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold">
+            {process.env.NEXT_PUBLIC_APP_NAME ?? "NRL Model"}
+          </h1>
+          <p className="mt-1 text-sm text-slate-400">
+            Season {CURRENT_YEAR} · Elo model vs bookmaker markets
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2 text-sm">
+          <Link
+            href={`/season/${CURRENT_YEAR}`}
+            className="rounded bg-sky-700 px-3 py-1.5 font-medium hover:bg-sky-600"
+          >
+            Season {CURRENT_YEAR}
+          </Link>
+          {data?.currentRound && (
+            <Link
+              href={`/season/${CURRENT_YEAR}/round/${data.currentRound}`}
+              className="rounded bg-slate-700 px-3 py-1.5 hover:bg-slate-600"
+            >
+              Round {data.currentRound}
+            </Link>
+          )}
+          <Link
+            href="/settings"
+            className="rounded bg-slate-800 px-3 py-1.5 hover:bg-slate-700"
+          >
+            Settings
+          </Link>
+        </div>
+      </div>
 
-      <div className="mb-4 flex flex-wrap gap-2 text-sm">
-        <a href="/?sort=time" className="rounded bg-slate-800 px-3 py-1">Sort: Time</a>
-        <a href="/?sort=edge" className="rounded bg-slate-800 px-3 py-1">Sort: Biggest Edge</a>
-        <a href="/?sort=confidence" className="rounded bg-slate-800 px-3 py-1">Sort: Confidence</a>
-        <Link href={`/season/${currentSeason}`} className="rounded bg-sky-700 px-3 py-1">Season {currentSeason}</Link>
-        <Link href={`/season/${currentSeason}/round/${currentRound}`} className="rounded bg-slate-700 px-3 py-1">Current Round {currentRound}</Link>
-        <a href="/settings" className="rounded bg-slate-700 px-3 py-1">Settings</a>
-      </div>
-      {loadError ? (
-        <p className="mb-4 rounded border border-amber-500/40 bg-amber-900/20 px-3 py-2 text-sm text-amber-200">{loadError}</p>
-      ) : null}
-      <div className="grid gap-4">
-        {sorted.map((p) => (
-          <MatchCard
-            key={p.id}
-            id={p.matchId}
-            homeTeam={p.homeTeam.shortName}
-            awayTeam={p.awayTeam.shortName}
-            kickoffAt={p.match.kickoffAt.toISOString()}
-            homeModel={p.modelHomeProbability}
-            homeOdds={p.marketHomeProbability ? 1 / p.marketHomeProbability : null}
-            homeMarket={p.marketHomeProbability}
-            homeEdge={p.homeEdge}
-            confidence={p.confidence}
-          />
-        ))}
-      </div>
-    </main>
+      {loadError && (
+        <div className="mb-6 rounded border border-amber-500/40 bg-amber-900/20 px-4 py-3 text-sm text-amber-200">
+          Database error: {loadError}. Run bootstrap from Settings to set up data.
+        </div>
+      )}
+
+      {data && (
+        <>
+          <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <SummaryCard
+              label="Season matches"
+              value={data.totalMatches}
+              sub={`Season ${CURRENT_YEAR}`}
+            />
+            <SummaryCard
+              label="Predictions graded"
+              value={data.gradedCount}
+              sub={`${data.correct} correct`}
+            />
+            <SummaryCard
+              label="Season accuracy"
+              value={data.accuracy ? `${data.accuracy}%` : "—"}
+              sub="Pre-match predictions"
+            />
+            <SummaryCard
+              label="High-edge upcoming"
+              value={data.highEdge}
+              sub="Edge ≥ 6%"
+            />
+          </div>
+
+          <h2 className="mb-4 text-xl font-semibold">Upcoming predictions</h2>
+
+          {data.upcomingPredictions.length === 0 ? (
+            <div className="rounded border border-slate-700 bg-slate-900 px-6 py-10 text-center text-slate-400">
+              No upcoming predictions found. Run a{" "}
+              <Link href="/settings" className="underline">
+                season sync
+              </Link>{" "}
+              to import fixtures and generate predictions.
+            </div>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {data.upcomingPredictions.map((p) => (
+                <MatchCard
+                  key={p.id}
+                  slug={p.match.slug ?? p.matchId}
+                  homeTeam={p.homeTeam.shortName}
+                  awayTeam={p.awayTeam.shortName}
+                  kickoffAt={p.match.kickoffAt.toISOString()}
+                  venue={p.match.venue}
+                  round={p.match.round}
+                  homeWinProb={p.homeWinProbability}
+                  awayWinProb={p.awayWinProbability}
+                  homeImplied={p.homeImpliedProbability}
+                  awayImplied={p.awayImpliedProbability}
+                  homeEdge={p.homeEdge}
+                  awayEdge={p.awayEdge}
+                  confidence={p.confidence}
+                  homeOdds={
+                    p.homeImpliedProbability && p.homeImpliedProbability > 0
+                      ? 1 / p.homeImpliedProbability
+                      : null
+                  }
+                  awayOdds={
+                    p.awayImpliedProbability && p.awayImpliedProbability > 0
+                      ? 1 / p.awayImpliedProbability
+                      : null
+                  }
+                />
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 }

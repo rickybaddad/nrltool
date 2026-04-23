@@ -2,68 +2,154 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-const teams = [
+const TEAMS = [
   {
     slug: "brisbane-broncos",
-    fullName: "Brisbane Broncos",
+    name: "Brisbane Broncos",
     shortName: "Broncos",
-    aliases: ["Brisbane", "Brisbane Broncos", "Broncos", "Brisbane Broncs"]
+    aliases: ["Brisbane", "Brisbane Broncos", "Broncos", "Brisbane Broncs", "BRI"],
   },
-  { slug: "canberra-raiders", fullName: "Canberra Raiders", shortName: "Raiders", aliases: ["Canberra", "Canberra Raiders", "Raiders"] },
-  { slug: "canterbury-bulldogs", fullName: "Canterbury-Bankstown Bulldogs", shortName: "Bulldogs", aliases: ["Canterbury", "Bulldogs", "Canterbury Bulldogs", "Canterbury-Bankstown"] },
-  { slug: "cronulla-sharks", fullName: "Cronulla-Sutherland Sharks", shortName: "Sharks", aliases: ["Cronulla", "Sharks", "Cronulla Sharks"] },
-  { slug: "dolphins", fullName: "The Dolphins", shortName: "Dolphins", aliases: ["Dolphins", "Redcliffe", "The Dolphins"] },
-  { slug: "gold-coast-titans", fullName: "Gold Coast Titans", shortName: "Titans", aliases: ["Gold Coast", "Titans", "Gold Coast Titans"] },
-  { slug: "manly-sea-eagles", fullName: "Manly Warringah Sea Eagles", shortName: "Sea Eagles", aliases: ["Manly", "Sea Eagles", "Manly Sea Eagles"] },
-  { slug: "melbourne-storm", fullName: "Melbourne Storm", shortName: "Storm", aliases: ["Melbourne", "Storm", "Melbourne Storm"] },
-  { slug: "newcastle-knights", fullName: "Newcastle Knights", shortName: "Knights", aliases: ["Newcastle", "Knights", "Newcastle Knights"] },
-  { slug: "new-zealand-warriors", fullName: "New Zealand Warriors", shortName: "Warriors", aliases: ["Warriors", "NZ Warriors", "New Zealand"] },
-  { slug: "north-queensland-cowboys", fullName: "North Queensland Cowboys", shortName: "Cowboys", aliases: ["Cowboys", "North Queensland", "NQ Cowboys"] },
-  { slug: "parramatta-eels", fullName: "Parramatta Eels", shortName: "Eels", aliases: ["Parramatta", "Eels", "Parramatta Eels"] },
-  { slug: "penrith-panthers", fullName: "Penrith Panthers", shortName: "Panthers", aliases: ["Penrith", "Panthers", "Penrith Panthers"] },
-  { slug: "south-sydney-rabbitohs", fullName: "South Sydney Rabbitohs", shortName: "Rabbitohs", aliases: ["South Sydney", "Rabbitohs", "Souths"] },
-  { slug: "st-george-illawarra-dragons", fullName: "St George Illawarra Dragons", shortName: "Dragons", aliases: ["St George", "Dragons", "St George Illawarra"] },
-  { slug: "sydney-roosters", fullName: "Sydney Roosters", shortName: "Roosters", aliases: ["Roosters", "Sydney Roosters", "Eastern Suburbs"] },
-  { slug: "wests-tigers", fullName: "Wests Tigers", shortName: "Tigers", aliases: ["Wests Tigers", "Tigers", "Balmain-Wests"] }
+  {
+    slug: "canberra-raiders",
+    name: "Canberra Raiders",
+    shortName: "Raiders",
+    aliases: ["Canberra", "Canberra Raiders", "Raiders", "CBR"],
+  },
+  {
+    slug: "canterbury-bulldogs",
+    name: "Canterbury-Bankstown Bulldogs",
+    shortName: "Bulldogs",
+    aliases: ["Canterbury", "Bulldogs", "Canterbury Bulldogs", "Canterbury-Bankstown", "CBY"],
+  },
+  {
+    slug: "cronulla-sharks",
+    name: "Cronulla-Sutherland Sharks",
+    shortName: "Sharks",
+    aliases: ["Cronulla", "Sharks", "Cronulla Sharks", "Cronulla-Sutherland", "CRO"],
+  },
+  {
+    slug: "dolphins",
+    name: "The Dolphins",
+    shortName: "Dolphins",
+    aliases: ["Dolphins", "Redcliffe", "The Dolphins", "Redcliffe Dolphins", "DOL"],
+  },
+  {
+    slug: "gold-coast-titans",
+    name: "Gold Coast Titans",
+    shortName: "Titans",
+    aliases: ["Gold Coast", "Titans", "Gold Coast Titans", "GLD"],
+  },
+  {
+    slug: "manly-sea-eagles",
+    name: "Manly Warringah Sea Eagles",
+    shortName: "Sea Eagles",
+    aliases: ["Manly", "Sea Eagles", "Manly Sea Eagles", "Manly Warringah", "MAN"],
+  },
+  {
+    slug: "melbourne-storm",
+    name: "Melbourne Storm",
+    shortName: "Storm",
+    aliases: ["Melbourne", "Storm", "Melbourne Storm", "MEL"],
+  },
+  {
+    slug: "newcastle-knights",
+    name: "Newcastle Knights",
+    shortName: "Knights",
+    aliases: ["Newcastle", "Knights", "Newcastle Knights", "NEW"],
+  },
+  {
+    slug: "new-zealand-warriors",
+    name: "New Zealand Warriors",
+    shortName: "Warriors",
+    aliases: ["Warriors", "NZ Warriors", "New Zealand", "New Zealand Warriors", "WAR"],
+  },
+  {
+    slug: "north-queensland-cowboys",
+    name: "North Queensland Cowboys",
+    shortName: "Cowboys",
+    aliases: ["Cowboys", "North Queensland", "NQ Cowboys", "North Queensland Cowboys", "NQL"],
+  },
+  {
+    slug: "parramatta-eels",
+    name: "Parramatta Eels",
+    shortName: "Eels",
+    aliases: ["Parramatta", "Eels", "Parramatta Eels", "PAR"],
+  },
+  {
+    slug: "penrith-panthers",
+    name: "Penrith Panthers",
+    shortName: "Panthers",
+    aliases: ["Penrith", "Panthers", "Penrith Panthers", "PEN"],
+  },
+  {
+    slug: "south-sydney-rabbitohs",
+    name: "South Sydney Rabbitohs",
+    shortName: "Rabbitohs",
+    aliases: ["South Sydney", "Rabbitohs", "Souths", "South Sydney Rabbitohs", "SOU"],
+  },
+  {
+    slug: "st-george-illawarra-dragons",
+    name: "St George Illawarra Dragons",
+    shortName: "Dragons",
+    aliases: ["St George", "Dragons", "St George Illawarra", "St George Illawarra Dragons", "SGI"],
+  },
+  {
+    slug: "sydney-roosters",
+    name: "Sydney Roosters",
+    shortName: "Roosters",
+    aliases: ["Roosters", "Sydney Roosters", "Eastern Suburbs", "SYD"],
+  },
+  {
+    slug: "wests-tigers",
+    name: "Wests Tigers",
+    shortName: "Tigers",
+    aliases: ["Wests Tigers", "Tigers", "Balmain-Wests", "Wests", "WST"],
+  },
 ];
 
 function normalizeName(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-export async function seedTeams() {
-  for (const team of teams) {
+export async function seedTeams(): Promise<void> {
+  for (const team of TEAMS) {
     const saved = await prisma.team.upsert({
       where: { slug: team.slug },
-      update: { fullName: team.fullName, shortName: team.shortName },
-      create: { slug: team.slug, fullName: team.fullName, shortName: team.shortName }
+      update: { name: team.name, shortName: team.shortName },
+      create: { slug: team.slug, name: team.name, shortName: team.shortName },
     });
 
     for (const alias of team.aliases) {
       await prisma.teamAlias.upsert({
         where: { alias },
-        update: {
-          normalized: normalizeName(alias),
-          source: "seed",
-          teamId: saved.id
-        },
-        create: {
-          alias,
-          normalized: normalizeName(alias),
-          source: "seed",
-          teamId: saved.id
-        }
+        update: { normalized: normalizeName(alias), source: "seed", teamId: saved.id },
+        create: { alias, normalized: normalizeName(alias), source: "seed", teamId: saved.id },
       });
     }
   }
 }
 
-if (require.main === module) {
-  seedTeams()
-    .then(async () => prisma.$disconnect())
-    .catch(async (err) => {
-      console.error(err);
-      await prisma.$disconnect();
-      process.exit(1);
-    });
+export async function seedCurrentSeason(): Promise<void> {
+  const year = new Date().getUTCFullYear();
+  await prisma.season.upsert({
+    where: { year },
+    update: { isActive: true },
+    create: { year, isActive: true },
+  });
 }
+
+async function main() {
+  console.log("Seeding teams…");
+  await seedTeams();
+  console.log("Seeding active season…");
+  await seedCurrentSeason();
+  console.log("Seed complete.");
+}
+
+main()
+  .then(async () => prisma.$disconnect())
+  .catch(async (err) => {
+    console.error(err);
+    await prisma.$disconnect();
+    process.exit(1);
+  });

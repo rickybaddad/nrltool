@@ -8,16 +8,18 @@ export async function GET() {
   try {
     const now = new Date();
     const predictions = await prisma.prediction.findMany({
-      where: { match: { kickoffAt: { gte: now } } },
+      where: {
+        isLatest: true,
+        match: { kickoffAt: { gte: now }, status: { in: ["SCHEDULED", "LIVE"] } },
+      },
       include: { match: true, homeTeam: true, awayTeam: true },
-      orderBy: { generatedAt: "desc" }
+      orderBy: { match: { kickoffAt: "asc" } },
     });
     return NextResponse.json(predictions);
   } catch (error) {
     const message = isDatabaseConnectivityError(error)
-      ? "Predictions are temporarily unavailable. Please check your database connection and try again."
+      ? "Predictions unavailable — check database connection."
       : `Failed to load predictions: ${getErrorMessage(error)}`;
-
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }

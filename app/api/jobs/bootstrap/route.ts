@@ -12,6 +12,6 @@ export async function POST() {
     const result = await runBootstrap();
     return NextResponse.json({ ok: true, seeded, result });
   } catch (error) {
-    return NextResponse.json({ ok: false, error: `Run bootstrap failed: ${getErrorMessage(error)}` }, { status: 500 });
+    return NextResponse.json({ ok: false, error: getErrorMessage(error) }, { status: 500 });
   }
 }

@@ -7,6 +7,6 @@ export async function POST() {
     const result = await runImportOdds();
     return NextResponse.json({ ok: true, result });
   } catch (error) {
-    return NextResponse.json({ ok: false, error: `Import odds failed: ${getErrorMessage(error)}` }, { status: 500 });
+    return NextResponse.json({ ok: false, error: getErrorMessage(error) }, { status: 500 });
   }
 }

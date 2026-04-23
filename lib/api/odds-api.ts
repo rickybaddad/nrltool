@@ -21,6 +21,10 @@ export async function fetchOdds(): Promise<OddsApiGame[]> {
   });
 
   const res = await fetch(`https://api.the-odds-api.com/v4/sports/rugby_league_nrl/odds?${params.toString()}`, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Odds API error: ${res.status}`);
+  if (!res.ok) {
+    const body = (await res.text()).trim();
+    const detail = body.length ? ` - ${body}` : "";
+    throw new Error(`Odds API error: ${res.status}${detail}`);
+  }
   return (await res.json()) as OddsApiGame[];
 }

@@ -32,6 +32,10 @@ Reference template: `.env.example`.
    - `npx prisma migrate deploy`
 3. Use `POST /api/jobs/bootstrap` to seed/import all data.
 
+### Troubleshooting
+- If you see `The table public.ImportRun does not exist`, your schema migrations have not been applied yet.
+- Run `npx prisma migrate deploy` against the same `DATABASE_URL` used by the app, then retry `POST /api/jobs/bootstrap`.
+
 ## API Endpoints
 ### Read
 - `GET /api/matches`

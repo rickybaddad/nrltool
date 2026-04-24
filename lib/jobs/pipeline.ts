@@ -579,53 +579,53 @@ export async function generatePredictions(options: PredictionOptions = {}) {
   const matches = await prisma.match.findMany({
     where,
     orderBy: { kickoffAt: "asc" },
-    include: {
-      oddsSnapshots: { orderBy: { pulledAt: "desc" }, take: 1 },
-    },
+    include: { oddsSnapshots: { orderBy: { pulledAt: "desc" }, take: 1 } },
   });
+
+  if (matches.length === 0) return { read: 0, written: 0 };
+
+  const matchIds = matches.map((m) => m.id);
+  const teamIds = [...new Set(matches.flatMap((m) => [m.homeTeamId, m.awayTeamId]))];
+
+  // Bulk-load existing latest predictions and team ratings in parallel
+  const [existingPreds, ratingSnaps] = await Promise.all([
+    prisma.prediction.findMany({
+      where: { matchId: { in: matchIds }, isLatest: true },
+      select: { matchId: true },
+    }),
+    prisma.teamRatingSnapshot.findMany({
+      where: { teamId: { in: teamIds } },
+      orderBy: { asOfDate: "desc" },
+    }),
+  ]);
+
+  const hasLatestPred = new Set(existingPreds.map((p) => p.matchId));
+
+  // Keep only the most recent snapshot per team
+  const latestRating = new Map<string, number>();
+  for (const snap of ratingSnaps) {
+    if (!latestRating.has(snap.teamId)) latestRating.set(snap.teamId, snap.ratingAfter);
+  }
 
   let written = 0;
 
   for (const match of matches) {
-    // Skip if a valid pre-match prediction already exists for this match
-    const existing = await prisma.prediction.findFirst({
-      where: {
-        matchId: match.id,
-        generatedAt: { lte: match.kickoffAt },
-        isLatest: true,
-      },
-    });
-    if (existing) continue;
+    if (hasLatestPred.has(match.id)) continue;
 
-    // Get latest ratings for each team
-    const homeSnap = await prisma.teamRatingSnapshot.findFirst({
-      where: { teamId: match.homeTeamId },
-      orderBy: { asOfDate: "desc" },
-    });
-    const awaySnap = await prisma.teamRatingSnapshot.findFirst({
-      where: { teamId: match.awayTeamId },
-      orderBy: { asOfDate: "desc" },
-    });
-
-    const homeRating = homeSnap?.ratingAfter ?? env.STARTING_ELO;
-    const awayRating = awaySnap?.ratingAfter ?? env.STARTING_ELO;
+    const homeRating = latestRating.get(match.homeTeamId) ?? env.STARTING_ELO;
+    const awayRating = latestRating.get(match.awayTeamId) ?? env.STARTING_ELO;
     const pred = predictMatch(homeRating, awayRating, env.HOME_ADVANTAGE_ELO);
 
     const bestOdds = match.oddsSnapshots[0] ?? null;
     const homeEdge = calcEdge(pred.homeProbability, bestOdds?.homeImpliedNormalized);
     const awayEdge = calcEdge(pred.awayProbability, bestOdds?.awayImpliedNormalized);
     const maxEdge = Math.max(Math.abs(homeEdge ?? 0), Math.abs(awayEdge ?? 0));
-    const confidence = confidenceLabel(
-      maxEdge,
-      env.CONFIDENCE_MEDIUM_THRESHOLD,
-      env.CONFIDENCE_HIGH_THRESHOLD
-    );
+    const confidence = confidenceLabel(maxEdge, env.CONFIDENCE_MEDIUM_THRESHOLD, env.CONFIDENCE_HIGH_THRESHOLD);
 
     let predictedWinnerTeamId: string | null = null;
     if (pred.homeProbability > pred.awayProbability) predictedWinnerTeamId = match.homeTeamId;
     else if (pred.awayProbability > pred.homeProbability) predictedWinnerTeamId = match.awayTeamId;
 
-    // Mark any previous latest for this match as not-latest
     await prisma.prediction.updateMany({
       where: { matchId: match.id, isLatest: true },
       data: { isLatest: false },
@@ -699,74 +699,82 @@ export async function evaluatePredictions(
   if (options.season != null) where.season = options.season;
   if (options.round != null) where.round = options.round;
 
-  const matches = await prisma.match.findMany({
-    where,
-    orderBy: { kickoffAt: "asc" },
+  const matches = await prisma.match.findMany({ where, orderBy: { kickoffAt: "asc" } });
+  if (matches.length === 0) return { read: 0, written: 0, noPrediction: 0 };
+
+  const matchIds = matches.map((m) => m.id);
+
+  // Bulk-load all predictions for these matches in one query
+  const allPredictions = await prisma.prediction.findMany({
+    where: { matchId: { in: matchIds } },
+    orderBy: { generatedAt: "desc" },
   });
 
-  let written = 0;
+  // Group by matchId (already desc order → first match per matchId is latest)
+  const predsByMatch = new Map<string, typeof allPredictions>();
+  for (const pred of allPredictions) {
+    const bucket = predsByMatch.get(pred.matchId);
+    if (bucket) bucket.push(pred);
+    else predsByMatch.set(pred.matchId, [pred]);
+  }
+
+  type PendingEval = {
+    candidateId: string;
+    matchId: string;
+    resultType: PredictionResultType;
+    actualWinnerTeamId: string | null;
+    wasCorrect: boolean | null;
+  };
+
+  const pending: PendingEval[] = [];
   let noPrediction = 0;
 
   for (const match of matches) {
-    // Best pre-match prediction: generated before kickoff, latest by time
-    const candidate = await prisma.prediction.findFirst({
-      where: {
-        matchId: match.id,
-        generatedAt: { lte: match.kickoffAt },
-      },
-      orderBy: { generatedAt: "desc" },
-    });
+    const preds = predsByMatch.get(match.id) ?? [];
+    const candidate = preds.find((p) => p.generatedAt <= match.kickoffAt);
 
-    const actualWinner = winnerFromScore(
-      match.homeScore,
-      match.awayScore,
-      match.homeTeamId,
-      match.awayTeamId
-    );
+    if (!candidate) { noPrediction++; continue; }
 
-    if (!candidate) {
-      noPrediction++;
-      continue;
-    }
+    const actualWinner = winnerFromScore(match.homeScore, match.awayScore, match.homeTeamId, match.awayTeamId);
 
     const resultType: PredictionResultType = (() => {
       if (actualWinner === null) return PredictionResultType.NO_RESULT;
       if (actualWinner === "DRAW") return PredictionResultType.DRAW;
       if (!candidate.predictedWinnerTeamId) return PredictionResultType.NO_PREDICTION;
-      return candidate.predictedWinnerTeamId === actualWinner
-        ? PredictionResultType.WIN
-        : PredictionResultType.LOSS;
+      return candidate.predictedWinnerTeamId === actualWinner ? PredictionResultType.WIN : PredictionResultType.LOSS;
     })();
 
-    await prisma.$transaction([
-      prisma.prediction.updateMany({
-        where: { matchId: match.id },
-        data: { usedForEvaluation: false },
-      }),
-      prisma.prediction.update({
-        where: { id: candidate.id },
-        data: {
-          actualWinnerTeamId:
-            typeof actualWinner === "string" && actualWinner !== "DRAW"
-              ? actualWinner
-              : null,
-          wasCorrect:
-            resultType === PredictionResultType.WIN
-              ? true
-              : resultType === PredictionResultType.LOSS
-              ? false
-              : null,
-          resultType,
-          usedForEvaluation: true,
-          evaluatedAt: new Date(),
-        },
-      }),
-    ]);
-
-    written++;
+    pending.push({
+      candidateId: candidate.id,
+      matchId: match.id,
+      resultType,
+      actualWinnerTeamId: typeof actualWinner === "string" && actualWinner !== "DRAW" ? actualWinner : null,
+      wasCorrect: resultType === PredictionResultType.WIN ? true : resultType === PredictionResultType.LOSS ? false : null,
+    });
   }
 
-  return { read: matches.length, written, noPrediction };
+  if (pending.length === 0) return { read: matches.length, written: 0, noPrediction };
+
+  // Reset all in one call, then update candidates in parallel chunks
+  await prisma.prediction.updateMany({
+    where: { matchId: { in: matchIds } },
+    data: { usedForEvaluation: false },
+  });
+
+  await chunkAll(pending, async (ev) => {
+    await prisma.prediction.update({
+      where: { id: ev.candidateId },
+      data: {
+        actualWinnerTeamId: ev.actualWinnerTeamId,
+        wasCorrect: ev.wasCorrect,
+        resultType: ev.resultType,
+        usedForEvaluation: true,
+        evaluatedAt: new Date(),
+      },
+    });
+  });
+
+  return { read: matches.length, written: pending.length, noPrediction };
 }
 
 export async function runEvaluatePredictions(

@@ -28,6 +28,7 @@ enum ImportRunStatus {
 enum ImportRunType {
   BOOTSTRAP
   SYNC_SEASON
+  SYNC_RESULTS
   SEED_TEAMS
   IMPORT_HISTORY
   IMPORT_FIXTURES

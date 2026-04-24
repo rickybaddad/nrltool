@@ -31,6 +31,13 @@ const manualJobs: Job[] = [
     description: "Fetches and upserts the full fixture list for the selected season.",
   },
   {
+    key: "sync-results",
+    label: "Sync results",
+    path: "/api/jobs/sync-results",
+    description:
+      "Checks past incomplete matches and the current NRL week (Thu–Mon) for updated scores. Calls TheSportsDB once per date — no season endpoint used.",
+  },
+  {
     key: "refresh-results",
     label: "Refresh results",
     path: "/api/jobs/refresh-results",
@@ -114,11 +121,22 @@ function SyncProgress({
   );
 }
 
+type SyncResultsSummary = {
+  datesChecked: string[];
+  apiCallsMade: number;
+  eventsReturned: number;
+  matchesUpdated: number;
+  resultsCompleted: number;
+  unmatchedEvents: Array<{ date: string; homeTeam: string; awayTeam: string }>;
+  stillMissingResults: Array<{ homeTeam: string; awayTeam: string; kickoffAt: string }>;
+};
+
 export function ManualJobControls() {
   const [runningKey, setRunningKey] = useState<string | null>(null);
   const [status, setStatus] = useState<string>("No job triggered yet.");
   const [syncLines, setSyncLines] = useState<StepLine[]>([]);
   const [syncFinal, setSyncFinal] = useState<string | null>(null);
+  const [syncResultsSummary, setSyncResultsSummary] = useState<SyncResultsSummary | null>(null);
 
   async function triggerStreaming(job: Job) {
     setRunningKey(job.key);
@@ -187,6 +205,7 @@ export function ManualJobControls() {
     setRunningKey(job.key);
     setSyncLines([]);
     setSyncFinal(null);
+    setSyncResultsSummary(null);
     setStatus(`Running ${job.label.toLowerCase()}...`);
 
     try {
@@ -203,7 +222,12 @@ export function ManualJobControls() {
             : `${res.status} ${res.statusText}`;
         throw new Error(apiError);
       }
-      setStatus(`${job.label} completed successfully.`);
+      if (job.key === "sync-results" && payload) {
+        setSyncResultsSummary(payload as SyncResultsSummary);
+        setStatus("");
+      } else {
+        setStatus(`${job.label} completed successfully.`);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       setStatus(`${job.label} failed: ${message}`);
@@ -240,6 +264,27 @@ export function ManualJobControls() {
               (syncLines.length > 0 || syncFinal !== null || runningKey === "sync-season") && (
                 <SyncProgress lines={syncLines} finalStatus={syncFinal} />
               )}
+
+            {job.key === "sync-results" && syncResultsSummary && (
+              <div className="mt-3 rounded border border-slate-700 bg-slate-950 p-3 text-xs font-mono space-y-1">
+                <div className="text-emerald-400 font-semibold mb-2">Sync results complete</div>
+                <div><span className="text-slate-400">Dates checked:</span> {syncResultsSummary.datesChecked.join(", ") || "none"}</div>
+                <div><span className="text-slate-400">API calls made:</span> {syncResultsSummary.apiCallsMade}</div>
+                <div><span className="text-slate-400">Events returned:</span> {syncResultsSummary.eventsReturned}</div>
+                <div><span className="text-slate-400">Matches updated:</span> {syncResultsSummary.matchesUpdated}</div>
+                <div><span className="text-slate-400">Results completed:</span> {syncResultsSummary.resultsCompleted}</div>
+                {syncResultsSummary.unmatchedEvents.length > 0 && (
+                  <div className="text-amber-400 mt-1">
+                    {syncResultsSummary.unmatchedEvents.length} unmatched event(s)
+                  </div>
+                )}
+                {syncResultsSummary.stillMissingResults.length > 0 && (
+                  <div className="text-amber-400">
+                    {syncResultsSummary.stillMissingResults.length} match(es) still missing results
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>

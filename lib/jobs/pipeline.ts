@@ -607,7 +607,9 @@ export async function generatePredictions(options: PredictionOptions = {}) {
     if (!latestRating.has(snap.teamId)) latestRating.set(snap.teamId, snap.ratingAfter);
   }
 
-  let written = 0;
+  // Build all new prediction rows in memory — no DB calls in the loop
+  const generatedAt = new Date();
+  const rows: Prisma.PredictionCreateManyInput[] = [];
 
   for (const match of matches) {
     if (hasLatestPred.has(match.id)) continue;
@@ -626,39 +628,42 @@ export async function generatePredictions(options: PredictionOptions = {}) {
     if (pred.homeProbability > pred.awayProbability) predictedWinnerTeamId = match.homeTeamId;
     else if (pred.awayProbability > pred.homeProbability) predictedWinnerTeamId = match.awayTeamId;
 
-    await prisma.prediction.updateMany({
-      where: { matchId: match.id, isLatest: true },
-      data: { isLatest: false },
+    rows.push({
+      matchId: match.id,
+      homeTeamId: match.homeTeamId,
+      awayTeamId: match.awayTeamId,
+      modelVersion: "elo-v1",
+      generatedAt,
+      lockedAt: match.kickoffAt,
+      isLatest: true,
+      homeTeamRating: homeRating,
+      awayTeamRating: awayRating,
+      homeAdvantageApplied: env.HOME_ADVANTAGE_ELO,
+      eloDifference: homeRating - awayRating,
+      homeWinProbability: pred.homeProbability,
+      awayWinProbability: pred.awayProbability,
+      homeImpliedProbability: bestOdds?.homeImpliedNormalized ?? null,
+      awayImpliedProbability: bestOdds?.awayImpliedNormalized ?? null,
+      homeEdge,
+      awayEdge,
+      confidence,
+      selectedBookmaker: bestOdds?.bookmakerTitle ?? null,
+      predictedWinnerTeamId,
     });
-
-    await prisma.prediction.create({
-      data: {
-        matchId: match.id,
-        homeTeamId: match.homeTeamId,
-        awayTeamId: match.awayTeamId,
-        modelVersion: "elo-v1",
-        generatedAt: new Date(),
-        lockedAt: match.kickoffAt,
-        isLatest: true,
-        homeTeamRating: homeRating,
-        awayTeamRating: awayRating,
-        homeAdvantageApplied: env.HOME_ADVANTAGE_ELO,
-        eloDifference: homeRating - awayRating,
-        homeWinProbability: pred.homeProbability,
-        awayWinProbability: pred.awayProbability,
-        homeImpliedProbability: bestOdds?.homeImpliedNormalized ?? null,
-        awayImpliedProbability: bestOdds?.awayImpliedNormalized ?? null,
-        homeEdge,
-        awayEdge,
-        confidence,
-        selectedBookmaker: bestOdds?.bookmakerTitle ?? null,
-        predictedWinnerTeamId,
-      },
-    });
-    written++;
   }
 
-  return { read: matches.length, written };
+  if (rows.length === 0) return { read: matches.length, written: 0 };
+
+  const needsNewPred = rows.map((r) => r.matchId);
+
+  // Reset old latest flags and insert all new predictions in 2 DB calls
+  await prisma.prediction.updateMany({
+    where: { matchId: { in: needsNewPred }, isLatest: true },
+    data: { isLatest: false },
+  });
+  const { count } = await prisma.prediction.createMany({ data: rows });
+
+  return { read: matches.length, written: count };
 }
 
 export async function runGeneratePredictions(options: PredictionOptions = {}) {

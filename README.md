@@ -181,6 +181,7 @@ All accept `POST` with JSON body.
 |---|---|---|
 | `/api/jobs/bootstrap` | `{ season }` | Full first-run setup |
 | `/api/jobs/sync-season` | `{ season }` | Import + refresh + odds + predict + evaluate |
+| `/api/jobs/sync-results` | — | Smart results + upcoming week sync (see below) |
 | `/api/jobs/import-season-schedule` | `{ season }` | Import fixture list from NRL.com |
 | `/api/jobs/refresh-results` | `{ season }` | Update completed scores |
 | `/api/jobs/import-odds` | `{ season }` | Pull odds from The Odds API |
@@ -189,6 +190,68 @@ All accept `POST` with JSON body.
 | `/api/jobs/evaluate-predictions` | `{ season?, round? }` | Grade completed predictions |
 
 All jobs log to the `ImportRun` table. Check that table for success/failure details.
+
+---
+
+## Smart results sync: POST /api/jobs/sync-results
+
+This is the recommended way to keep match results up to date without running a full season sync.
+
+```bash
+curl -X POST https://your-domain.vercel.app/api/jobs/sync-results
+```
+
+### What it does
+
+1. **Past incomplete matches** — queries the database for any match where:
+   - `kickoffAt` is in the past
+   - status is not `FINISHED`
+   - `homeScore` or `awayScore` is null
+
+2. **Current/upcoming NRL week** — calculates the Thursday-to-Monday window for the current or upcoming NRL round (Australia/Sydney time):
+   - If today is Thursday, Friday, Saturday, Sunday, or Monday: uses the current week's Thu–Mon
+   - If today is Tuesday or Wednesday: uses the upcoming week's Thu–Mon
+
+3. **Deduplication** — combines the dates from steps 1 and 2, removes duplicates, then calls the TheSportsDB `eventsday` endpoint **once per unique date** (never uses the season endpoint).
+
+4. **Matching** — for each TheSportsDB event returned:
+   - Normalizes home and away team names
+   - Matches against stored DB matches by team pair + Sydney local date
+   - Falls back to a 12-hour kickoff tolerance if needed
+
+5. **Updates** — if TheSportsDB has both scores:
+   - Sets `homeScore`, `awayScore`, and `status = FINISHED`
+   - Never overwrites an already-completed result
+   - Never downgrades a finished match back to scheduled
+   - A score of `0` is valid and is stored correctly
+
+### Response shape
+
+```json
+{
+  "success": true,
+  "datesChecked": ["2026-04-24", "2026-04-25", "2026-04-26", "2026-04-27", "2026-04-28"],
+  "apiCallsMade": 5,
+  "eventsReturned": 8,
+  "matchesUpdated": 3,
+  "resultsCompleted": 3,
+  "unmatchedEvents": [],
+  "stillMissingResults": []
+}
+```
+
+`unmatchedEvents` lists TheSportsDB events that could not be matched to any stored match (logged for data-quality inspection).  
+`stillMissingResults` lists past DB matches that remain incomplete after the sync.
+
+### TheSportsDB API
+
+- Endpoint: `https://www.thesportsdb.com/api/v1/json/{THESPORTSDB_API_KEY}/eventsday.php?d=YYYY-MM-DD&l=4416`
+- NRL league ID: `4416`
+- Set `THESPORTSDB_API_KEY` in environment variables (defaults to `123` if not set)
+
+### Schedule source of truth
+
+The schedule is **manually seeded** — `sync-results` only updates results for existing DB matches. It never creates new matches from TheSportsDB. To add new fixtures, run `/api/jobs/import-season-schedule` or `/api/jobs/bootstrap`.
 
 ---
 

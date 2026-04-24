@@ -480,7 +480,6 @@ export async function runCalculateRatings() {
 
 export async function runImportOdds(season = getYear(new Date())) {
   const run = await startRun(ImportRunType.IMPORT_ODDS);
-  let written = 0;
 
   try {
     const oddsGames = await fetchOdds();
@@ -488,6 +487,9 @@ export async function runImportOdds(season = getYear(new Date())) {
       where: { season, kickoffAt: { gte: new Date() } },
       include: { homeTeam: true, awayTeam: true },
     });
+
+    const pulledAt = new Date();
+    const rows: Prisma.OddsSnapshotCreateManyInput[] = [];
 
     for (const game of oddsGames) {
       const match = matches.find(
@@ -497,62 +499,62 @@ export async function runImportOdds(season = getYear(new Date())) {
       );
       if (!match) continue;
 
-      for (const book of game.bookmakers) {
-        const market = book.markets.find((mk) => mk.key === "h2h");
-        if (!market) continue;
+      // Only use Sportsbet
+      const book = game.bookmakers.find((b) => b.key === "sportsbet");
+      if (!book) continue;
 
-        const homeOutcome = market.outcomes.find(
-          (o) =>
-            o.name.toLowerCase().includes(match.homeTeam.shortName.toLowerCase()) ||
-            o.name.toLowerCase().includes(match.homeTeam.name.toLowerCase())
-        );
-        const awayOutcome = market.outcomes.find(
-          (o) =>
-            o.name.toLowerCase().includes(match.awayTeam.shortName.toLowerCase()) ||
-            o.name.toLowerCase().includes(match.awayTeam.name.toLowerCase())
-        );
-        if (!homeOutcome || !awayOutcome) continue;
+      const market = book.markets.find((mk) => mk.key === "h2h");
+      if (!market) continue;
 
-        const homeImp = impliedProbability(homeOutcome.price);
-        const awayImp = impliedProbability(awayOutcome.price);
-        const norm = normalizeProbabilities(homeImp, awayImp);
+      const homeOutcome = market.outcomes.find(
+        (o) =>
+          o.name.toLowerCase().includes(match.homeTeam.shortName.toLowerCase()) ||
+          o.name.toLowerCase().includes(match.homeTeam.name.toLowerCase())
+      );
+      const awayOutcome = market.outcomes.find(
+        (o) =>
+          o.name.toLowerCase().includes(match.awayTeam.shortName.toLowerCase()) ||
+          o.name.toLowerCase().includes(match.awayTeam.name.toLowerCase())
+      );
+      if (!homeOutcome || !awayOutcome) continue;
 
-        await prisma.oddsSnapshot.create({
-          data: {
-            matchId: match.id,
-            source: "the-odds-api",
-            bookmaker: book.key,
-            bookmakerTitle: book.title,
-            marketType: market.key,
-            homeTeamId: match.homeTeamId,
-            awayTeamId: match.awayTeamId,
-            homeOdds: homeOutcome.price,
-            awayOdds: awayOutcome.price,
-            homeImpliedRaw: homeImp,
-            awayImpliedRaw: awayImp,
-            homeImpliedNormalized: norm.a,
-            awayImpliedNormalized: norm.b,
-            overround: norm.overround,
-            pulledAt: new Date(),
-          },
-        });
-        written++;
-      }
+      const homeImp = impliedProbability(homeOutcome.price);
+      const awayImp = impliedProbability(awayOutcome.price);
+      const norm = normalizeProbabilities(homeImp, awayImp);
+
+      rows.push({
+        matchId: match.id,
+        source: "the-odds-api",
+        bookmaker: book.key,
+        bookmakerTitle: book.title,
+        marketType: market.key,
+        homeTeamId: match.homeTeamId,
+        awayTeamId: match.awayTeamId,
+        homeOdds: homeOutcome.price,
+        awayOdds: awayOutcome.price,
+        homeImpliedRaw: homeImp,
+        awayImpliedRaw: awayImp,
+        homeImpliedNormalized: norm.a,
+        awayImpliedNormalized: norm.b,
+        overround: norm.overround,
+        pulledAt,
+      });
     }
+
+    const { count } = await prisma.oddsSnapshot.createMany({ data: rows });
 
     await finalizeRun(run.id, {
       status: ImportRunStatus.SUCCESS,
-      message: "Odds imported",
+      message: "Odds imported (Sportsbet)",
       recordsRead: oddsGames.length,
-      recordsWritten: written,
+      recordsWritten: count,
       metadata: { season },
     });
-    return { read: oddsGames.length, written };
+    return { read: oddsGames.length, written: count };
   } catch (error) {
     await finalizeRun(run.id, {
       status: ImportRunStatus.FAILED,
       errorMessage: error instanceof Error ? error.message : "Unknown",
-      recordsWritten: written,
     });
     throw error;
   }

@@ -398,77 +398,73 @@ export async function runRefreshResults(season = getYear(new Date())) {
 
 export async function runCalculateRatings() {
   const run = await startRun(ImportRunType.CALCULATE_RATINGS);
-  const ratings = new Map<string, number>();
-  const teams = await prisma.team.findMany();
-  teams.forEach((t) => ratings.set(t.id, env.STARTING_ELO));
-
-  let written = 0;
 
   try {
-    const playedMatches = await prisma.match.findMany({
-      where: {
-        status: MatchStatus.FINISHED,
-        homeScore: { not: null },
-        awayScore: { not: null },
-      },
-      orderBy: { kickoffAt: "asc" },
-    });
+    const [teams, playedMatches] = await Promise.all([
+      prisma.team.findMany(),
+      prisma.match.findMany({
+        where: {
+          status: MatchStatus.FINISHED,
+          homeScore: { not: null },
+          awayScore: { not: null },
+        },
+        orderBy: { kickoffAt: "asc" },
+      }),
+    ]);
 
-    // Full recalculate — clear and rebuild
-    await prisma.teamRatingSnapshot.deleteMany({});
+    // Compute all rating snapshots in memory first — no DB writes in the loop
+    const ratings = new Map<string, number>();
+    teams.forEach((t) => ratings.set(t.id, env.STARTING_ELO));
+
+    const snapshots: Prisma.TeamRatingSnapshotCreateManyInput[] = [];
 
     for (const match of playedMatches) {
       const homeBefore = ratings.get(match.homeTeamId) ?? env.STARTING_ELO;
       const awayBefore = ratings.get(match.awayTeamId) ?? env.STARTING_ELO;
-      const result = updateEloRatings(
-        homeBefore,
-        awayBefore,
-        match.homeScore!,
-        match.awayScore!
-      );
+      const result = updateEloRatings(homeBefore, awayBefore, match.homeScore!, match.awayScore!);
 
       ratings.set(match.homeTeamId, result.newHome);
       ratings.set(match.awayTeamId, result.newAway);
 
-      await prisma.teamRatingSnapshot.createMany({
-        data: [
-          {
-            teamId: match.homeTeamId,
-            sourceMatchId: match.id,
-            seasonId: match.seasonId,
-            season: match.season,
-            ratingBefore: homeBefore,
-            ratingAfter: result.newHome,
-            ratingSystem: "elo-v1",
-            asOfDate: match.kickoffAt,
-          },
-          {
-            teamId: match.awayTeamId,
-            sourceMatchId: match.id,
-            seasonId: match.seasonId,
-            season: match.season,
-            ratingBefore: awayBefore,
-            ratingAfter: result.newAway,
-            ratingSystem: "elo-v1",
-            asOfDate: match.kickoffAt,
-          },
-        ],
-      });
-      written += 2;
+      snapshots.push(
+        {
+          teamId: match.homeTeamId,
+          sourceMatchId: match.id,
+          seasonId: match.seasonId,
+          season: match.season,
+          ratingBefore: homeBefore,
+          ratingAfter: result.newHome,
+          ratingSystem: "elo-v1",
+          asOfDate: match.kickoffAt,
+        },
+        {
+          teamId: match.awayTeamId,
+          sourceMatchId: match.id,
+          seasonId: match.seasonId,
+          season: match.season,
+          ratingBefore: awayBefore,
+          ratingAfter: result.newAway,
+          ratingSystem: "elo-v1",
+          asOfDate: match.kickoffAt,
+        }
+      );
     }
+
+    // Clear old snapshots and write all new ones in two DB round-trips
+    await prisma.teamRatingSnapshot.deleteMany({});
+    const { count } = await prisma.teamRatingSnapshot.createMany({ data: snapshots });
 
     await finalizeRun(run.id, {
       status: ImportRunStatus.SUCCESS,
       message: "Ratings calculated",
       recordsRead: playedMatches.length,
-      recordsWritten: written,
+      recordsWritten: count,
     });
-    return { read: playedMatches.length, written };
+    return { read: playedMatches.length, written: count };
   } catch (error) {
     await finalizeRun(run.id, {
       status: ImportRunStatus.FAILED,
       errorMessage: error instanceof Error ? error.message : "Unknown",
-      recordsWritten: written,
     });
     throw error;
   }

@@ -234,17 +234,22 @@ export async function syncSportsDbEventsByDates(
   ]);
 
   const unmatchedEvents: SyncSummary["unmatchedEvents"] = [];
-  let apiCallsMade = 0;
-  let eventsReturned = 0;
+
+  // Fetch all dates in parallel — avoids sequential latency stacking
+  const dayResults = await Promise.all(
+    deduped.map(async (dateStr) => ({
+      dateStr,
+      events: await fetchEventsByDay(dateStr),
+    }))
+  );
+
+  const apiCallsMade = dayResults.length;
+  const eventsReturned = dayResults.reduce((n, r) => n + r.events.length, 0);
 
   // Accumulate updates keyed by match id to avoid double-processing
   const pendingUpdates = new Map<string, { homeScore: number; awayScore: number }>();
 
-  for (const dateStr of deduped) {
-    const events = await fetchEventsByDay(dateStr);
-    apiCallsMade++;
-    eventsReturned += events.length;
-
+  for (const { dateStr, events } of dayResults) {
     for (const event of events) {
       const dbMatch = matchEventToDbMatch(event, dbMatches, teamLookup, timezone);
 

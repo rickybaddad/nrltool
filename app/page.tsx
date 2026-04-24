@@ -183,6 +183,8 @@ export default async function Home() {
                       ? 1 / p.awayImpliedProbability
                       : null
                   }
+                  expectedHomeScore={p.expectedHomeScore}
+                  expectedAwayScore={p.expectedAwayScore}
                 />
               ))}
             </div>

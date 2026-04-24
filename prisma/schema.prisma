@@ -233,6 +233,17 @@ model Prediction {
   // Model probabilities
   homeWinProbability    Float
   awayWinProbability    Float
+  // Phase 2: blended model breakdown
+  eloHomeProbability         Float?
+  eloAwayProbability         Float?
+  scoreModelHomeProbability  Float?
+  scoreModelAwayProbability  Float?
+  finalHomeProbability       Float?
+  finalAwayProbability       Float?
+  expectedHomeScore          Float?
+  expectedAwayScore          Float?
+  expectedMargin             Float?
+  expectedTotal              Float?
   // Market comparison
   homeImpliedProbability Float?
   awayImpliedProbability Float?

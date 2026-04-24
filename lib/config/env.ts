@@ -12,6 +12,9 @@ const schema = z.object({
   VALUE_EDGE_THRESHOLD: z.coerce.number().default(0.04),
   CONFIDENCE_MEDIUM_THRESHOLD: z.coerce.number().default(0.03),
   CONFIDENCE_HIGH_THRESHOLD: z.coerce.number().default(0.06),
+  ELO_MODEL_WEIGHT: z.coerce.number().min(0).max(1).default(0.5),
+  SCORE_MODEL_SCALE: z.coerce.number().positive().default(10),
+  SCORE_HOME_ADVANTAGE_FACTOR: z.coerce.number().positive().default(1.1),
   NEXT_PUBLIC_APP_NAME: z.string().default("NRL Model"),
   APP_TIMEZONE: z.string().default("Australia/Sydney"),
 });

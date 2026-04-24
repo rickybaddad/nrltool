@@ -4,12 +4,11 @@ import { getErrorMessage } from "@/lib/utils/error-message";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
-    const { runGeneratePredictions } = await import("@/lib/jobs/pipeline");
-    const result = await runGeneratePredictions({
-      season: body?.season != null ? Number(body.season) : undefined,
-      round: body?.round != null ? Number(body.round) : undefined,
-      upcomingOnly: body?.upcomingOnly ?? true,
-    });
+    const season = body?.season != null ? Number(body.season) : new Date().getUTCFullYear();
+    const { runGenerateSeasonPredictions } = await import(
+      "@/lib/jobs/chronological-predictions"
+    );
+    const result = await runGenerateSeasonPredictions(season);
     return NextResponse.json({ ok: true, result });
   } catch (error) {
     return NextResponse.json(

@@ -16,6 +16,8 @@ type Props = {
   homeEdge?: number | null;
   awayEdge?: number | null;
   confidence: string;
+  expectedHomeScore?: number | null;
+  expectedAwayScore?: number | null;
 };
 
 function confidenceCls(c: string) {
@@ -80,6 +82,17 @@ export function MatchCard(props: Props) {
           </div>
         ))}
       </div>
+
+      {/* Predicted score */}
+      {props.expectedHomeScore != null && props.expectedAwayScore != null && (
+        <div className="mt-2 flex items-center gap-1.5 text-xs text-slate-400">
+          <span>Predicted:</span>
+          <span className="font-medium tabular-nums text-white">
+            {props.homeTeam} {props.expectedHomeScore.toFixed(1)} –{" "}
+            {props.expectedAwayScore.toFixed(1)} {props.awayTeam}
+          </span>
+        </div>
+      )}
 
       {/* Odds + edge row */}
       <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-400">

@@ -168,9 +168,68 @@ export default async function MatchDetailPage({
               </div>
 
               <div className="space-y-3">
-                <ProbBar prob={latestPred.homeWinProbability} label={`${match.homeTeam.shortName} (model)`} />
-                <ProbBar prob={latestPred.awayWinProbability} label={`${match.awayTeam.shortName} (model)`} />
+                <ProbBar prob={latestPred.homeWinProbability} label={`${match.homeTeam.shortName} (blended)`} />
+                <ProbBar prob={latestPred.awayWinProbability} label={`${match.awayTeam.shortName} (blended)`} />
               </div>
+
+              {latestPred.eloHomeProbability != null && (
+                <div className="space-y-2 border-t border-slate-800 pt-4">
+                  <p className="text-xs text-slate-400">Model breakdown</p>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <p className="text-xs text-slate-400">Elo</p>
+                      <p className="font-medium">
+                        {((latestPred.eloHomeProbability) * 100).toFixed(1)}% /{" "}
+                        {((latestPred.eloAwayProbability ?? 0) * 100).toFixed(1)}%
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-400">Score model</p>
+                      <p className="font-medium">
+                        {((latestPred.scoreModelHomeProbability ?? 0) * 100).toFixed(1)}% /{" "}
+                        {((latestPred.scoreModelAwayProbability ?? 0) * 100).toFixed(1)}%
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {latestPred.expectedHomeScore != null && (
+                <div className="space-y-2 border-t border-slate-800 pt-4">
+                  <p className="text-xs text-slate-400">Predicted score</p>
+                  <div className="flex items-center gap-4 text-lg font-semibold tabular-nums">
+                    <span>
+                      {match.homeTeam.shortName}{" "}
+                      <span className="text-sky-400">
+                        {latestPred.expectedHomeScore.toFixed(1)}
+                      </span>
+                    </span>
+                    <span className="text-slate-500 text-base">—</span>
+                    <span>
+                      <span className="text-sky-400">
+                        {latestPred.expectedAwayScore?.toFixed(1)}
+                      </span>{" "}
+                      {match.awayTeam.shortName}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 text-xs text-slate-400">
+                    <div>
+                      Margin:{" "}
+                      <span className="font-medium text-white">
+                        {latestPred.expectedMargin != null
+                          ? `${latestPred.expectedMargin > 0 ? match.homeTeam.shortName : match.awayTeam.shortName} by ${Math.abs(latestPred.expectedMargin).toFixed(1)}`
+                          : "—"}
+                      </span>
+                    </div>
+                    <div>
+                      Total:{" "}
+                      <span className="font-medium text-white">
+                        {latestPred.expectedTotal?.toFixed(1) ?? "—"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {latestPred.homeImpliedProbability != null && (
                 <div className="space-y-3 border-t border-slate-800 pt-4">

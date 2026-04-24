@@ -37,8 +37,9 @@ const manualJobs: Job[] = [
     key: "generate-predictions",
     label: "Generate predictions",
     path: "/api/jobs/generate-predictions",
-    body: { season: currentSeason, upcomingOnly: true },
-    description: "Creates pre-match prediction snapshots for upcoming matches that don't yet have one.",
+    body: { season: currentSeason },
+    description:
+      "Regenerates predictions for every match in the season using the blended Elo + score model. Processes rounds in chronological order — model never sees future results.",
   },
   {
     key: "evaluate-predictions",

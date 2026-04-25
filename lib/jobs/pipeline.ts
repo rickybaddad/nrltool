@@ -736,7 +736,11 @@ export async function evaluatePredictions(
 
   for (const match of matches) {
     const preds = predsByMatch.get(match.id) ?? [];
-    const candidate = preds.find((p) => p.generatedAt <= match.kickoffAt);
+    const candidate = preds.find((p) => {
+      // Use lockedAt if set (chronological predictions lock at kickoff time)
+      const cutoff = p.lockedAt ?? p.generatedAt;
+      return cutoff <= match.kickoffAt;
+    });
 
     if (!candidate) { noPrediction++; continue; }
 

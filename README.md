@@ -1,7 +1,7 @@
 # NRL Model
 
 A production-ready, season-long NRL prediction dashboard.  
-Elo-based pre-match win probabilities compared against bookmaker odds to surface edge and confidence signals — tracked and graded across every round of the season.
+Blended Elo + score model pre-match win probabilities compared against bookmaker odds to surface edge and confidence signals — tracked, graded, and backtested across every round of the season.
 
 **This is an analysis tool only. No betting, payment, or wagering functionality.**
 
@@ -11,11 +11,11 @@ Elo-based pre-match win probabilities compared against bookmaker odds to surface
 
 - Stores the full NRL season schedule in Postgres (Supabase)
 - Browses matches round by round
-- Calculates pre-match win probabilities via an Elo model
-- Compares model probabilities to bookmaker odds (The Odds API)
+- Calculates pre-match win probabilities via a blended Elo + attack/defence score model
+- Compares model probabilities to bookmaker odds (The Odds API) to surface edge signals
 - Shows edge and confidence for every upcoming match
 - Tracks whether each prediction was correct after the match
-- Reviews season-level performance over time
+- Backtesting dashboard: accuracy, ROI, model comparison, edge/confidence/round breakdowns
 
 ---
 
@@ -304,15 +304,90 @@ Confidence bands:
 
 ---
 
+## Phase 2: blended model
+
+**Files:** `lib/models/score-model.ts`, `lib/jobs/chronological-predictions.ts`
+
+The prediction engine blends two independent models:
+
+### Elo model
+Standard Elo rating system, updated from every completed match since 2018. Captures team strength relative to historical opposition.
+
+### Attack/defence score model
+Dixon-Coles style expected-score model:
+```
+homeAttack  = team.avgPointsFor / leagueAvg
+awayDefence = team.avgPointsAgainst / leagueAvg
+expectedHomeScore = leagueAvg × homeAttack × awayDefence × homeAdvantageFactor
+```
+Probability is derived from expected margin via a logistic function:
+```
+scoreProb = 1 / (1 + exp(-expectedMargin / scale))
+```
+
+### Blended probability
+```
+finalProb = ELO_MODEL_WEIGHT × eloProb + (1 − ELO_MODEL_WEIGHT) × scoreProb
+```
+Defaults: `ELO_MODEL_WEIGHT=0.5`, `SCORE_MODEL_SCALE=10`, `SCORE_HOME_ADVANTAGE_FACTOR=1.1`
+
+### Chronological generation (no lookahead bias)
+`generateSeasonPredictionsChronologically(season)` processes every match in kickoff order.
+For each match it **first generates the prediction** using the current model state, then updates ratings with the result. This guarantees the model never uses future data.
+
+---
+
 ## Prediction grading
 
 **File:** `lib/jobs/pipeline.ts → evaluatePredictions()`
 
 For each completed match:
-- Finds the latest prediction generated **before kickoff**
+- Finds the latest prediction with `lockedAt ≤ kickoffAt` (or `generatedAt ≤ kickoffAt`)
 - Compares `predictedWinnerTeamId` to actual winner from score
 - Records `resultType`: `WIN`, `LOSS`, `DRAW`, `NO_RESULT`, `NO_PREDICTION`
 - Sets `wasCorrect`, `evaluatedAt`, `usedForEvaluation = true`
+
+---
+
+## Backtesting dashboard
+
+**Route:** `GET /backtesting`  
+**API:** `GET /api/backtesting?season=2026&modelType=blended&confidence=all&minEdge=0`
+
+Analyses all graded predictions for a season. Filters by season, model type, confidence level, and minimum edge. Sections:
+
+| Section | What it answers |
+|---|---|
+| Summary cards | Overall accuracy, P/L, ROI, best/worst rounds |
+| Model comparison | Elo vs score model vs blended on same dataset |
+| Round by round | Which rounds performed well or badly |
+| Edge buckets | Does higher edge predict better outcomes? |
+| Confidence buckets | Does High confidence actually outperform Low? |
+| Favourite vs underdog | Are model upsets profitable? |
+| Prediction list | Full record per match |
+
+### Accuracy calculation
+```
+accuracy = correct_predictions / (correct + incorrect)
+```
+Draws are excluded from the numerator and denominator (counted separately).
+
+### Theoretical ROI calculation
+```
+profit(win)  = (1 / homeImpliedNormalized) − 1  [fair-value odds − 1]
+profit(loss) = −1
+roi          = total_profit / total_bets_placed
+```
+Fair-value odds = `1 / normalized_implied_probability` (overround already removed). Actual market odds would be slightly lower, so real ROI would be lower than shown.
+
+### Model comparison explanation
+All three model variants are evaluated on the **same filtered dataset**. The predicted winner changes per model (based on which team has higher probability under that model). This isolates the decision-rule difference from the dataset difference.
+
+### Limitations
+- P/L uses fair-value odds, not actual bookmaker odds (slightly optimistic)
+- The score model uses all historical data by default; early rounds have limited current-season data
+- Draws are very rare in NRL but are excluded from accuracy metrics
+- Results depend on having run "Generate predictions" and "Evaluate predictions" from Settings
 
 ---
 

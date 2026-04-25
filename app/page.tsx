@@ -106,6 +106,12 @@ export default async function Home() {
             </Link>
           )}
           <Link
+            href="/backtesting"
+            className="rounded bg-slate-800 px-3 py-1.5 hover:bg-slate-700"
+          >
+            Backtesting
+          </Link>
+          <Link
             href="/settings"
             className="rounded bg-slate-800 px-3 py-1.5 hover:bg-slate-700"
           >
